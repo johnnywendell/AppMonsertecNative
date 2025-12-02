@@ -1,0 +1,46 @@
+import React from 'react';
+import { View, TouchableOpacity, StyleSheet, Text } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+
+import MedicaoCard from '../components/MedicaoCard';
+
+export default function MedicaoScreen() {
+    const navigation = useNavigation();
+  
+  return (
+    <View style={styles.container}>
+      <MedicaoCard
+        onPressItem={(id) => navigation.navigate('EditarMedicao', { id })}
+      />
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => navigation.navigate('CriarMedicao')} // pode mudar para 'CriarApontamentoScreen' se tiver uma tela separada
+        activeOpacity={0.7}
+      >
+        <Text style={styles.fabIcon}>＋</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  text: { fontSize: 22, fontWeight: 'bold' },
+    fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 30,
+    backgroundColor: '#00315c',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 5,
+  },
+  fabIcon: {
+    color: 'white',
+    fontSize: 30,
+    lineHeight: 30,
+  },
+});
