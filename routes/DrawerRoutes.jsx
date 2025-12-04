@@ -9,6 +9,7 @@ import RecursosHumanosStack from '../stack/RecursosHumanosStack.jsx';
 import MedicaoStack from '../stack/MedicaoStack.jsx';
 import QualidadeStack from '../stack/QualidadeStack.jsx';
 import CadastrosGeraisStack from '../stack/CadastrosGeraisStack.jsx';
+import PlanejamentoStack from '../stack/PlanejamentoStack.jsx';
 
 const Drawer = createDrawerNavigator();
 
@@ -71,6 +72,16 @@ const DrawerRoutes = () => {
                     component={CadastrosGeraisStack}
                     options={{
                         drawerLabel: 'Cadastros Gerais',
+                        drawerIcon: ({ color, size }) => (
+                            <MaterialIcons name="list-alt" size={size} color={color} />
+                        ),
+                    }}
+                />
+                <Drawer.Screen
+                    name="Planejamento"
+                    component={PlanejamentoStack}
+                    options={{
+                        drawerLabel: 'Planejamento',
                         drawerIcon: ({ color, size }) => (
                             <MaterialIcons name="list-alt" size={size} color={color} />
                         ),

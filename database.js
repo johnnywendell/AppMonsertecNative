@@ -130,6 +130,47 @@ export async function setupDatabase() {
                 FOREIGN KEY (contrato_id) REFERENCES contratos(id) ON DELETE SET NULL
             );
         `);
+        // --- TABELA RDC (Registro Diário de Contrato) ---
+        // NOTA: Esta tabela armazena os dados principais e os dados dos filhos (Serviços, HH e PIN)
+        // serializados como JSON em campos TEXT.
+        await database.execAsync(`
+            CREATE TABLE IF NOT EXISTS rdc (
+                id INTEGER PRIMARY KEY NOT NULL,
+                
+                -- Campos principais do RDC
+                data DATE,
+                local TEXT,
+                tipo TEXT,
+                doc TEXT, -- Armazena o path/url do documento
+                disciplina TEXT,
+                obs TEXT,
+                aprovado INTEGER DEFAULT 0, -- Booleano como INTEGER (0 ou 1)
+                encarregado TEXT,
+                clima TEXT,
+                inicio TIME,
+                termino TIME,
+                
+                -- Chaves Estrangeiras (Armazenando o ID do Servidor)
+                unidade_server_id INTEGER,
+                solicitante_server_id INTEGER,
+                aprovador_server_id INTEGER,
+                AS_server_id INTEGER,
+                projeto_cod_server_id INTEGER,
+                bm_server_id INTEGER,
+                
+                -- Campos JSON para os ITENS FILHOS ANINHADOS
+                -- Os arrays de ServicoRdc, ItemMedicaohh e ItemMedicaoPin são armazenados aqui como JSON strings.
+                servicos_json TEXT, 
+                hh_json TEXT, 
+                pin_json TEXT, 
+
+                -- Campos de Sincronização
+                server_id INTEGER UNIQUE,
+                sync_status TEXT DEFAULT 'synced', -- synced, pending, failed
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP 
+            );
+        `);
                 
         // --- TABELA COLABORADORES (AJUSTADA: Adicionado created_at) ---
         await db.execAsync(`

@@ -3,6 +3,44 @@ import { getDb } from '../database';
 import { criarRelatorioLocal } from './relatorioQualidadeService';
 import NetInfo from '@react-native-community/netinfo';
 
+const cleanNestedIds = (items) => {
+    if (!Array.isArray(items)) return [];
+    
+    return items.map(item => {
+        // Cria uma nova cópia do objeto, excluindo a chave 'id'
+        const { id, ...rest } = item;
+        return rest;
+    });
+};
+
+const ensureString = (value) => (value === null || value === undefined) ? "" : value;
+const AsyncStorage = {
+    getItem: async (key) => {
+        // Simula o retorno de null se não houver item
+        return null; 
+    },
+    setItem: async (key, value) => {
+        // Simula a gravação
+        return true;
+    }
+}
+// Função utilitária para executar múltiplas operações em lote/transação (necessária para syncRDCs)
+async function runBatchAsync(db, statements) {
+    // Esta é uma implementação simplificada; em um banco de dados Expo SQLite, 
+    // você usaria db.transactionAsync.
+    console.log(`⏳ Executando lote de ${statements.length} comandos SQL...`);
+    for (const stmt of statements) {
+        try {
+            await db.runAsync(stmt.sql, stmt.args);
+        } catch (e) {
+            console.error("❌ Erro ao executar statement em lote:", stmt.sql, stmt.args, e.message);
+            // Dependendo da sua necessidade, você pode lançar o erro para reverter a transação inteira
+        }
+    }
+    console.log("✅ Lote de comandos SQL concluído.");
+}
+
+
 export async function syncData() {
     const { isConnected } = await NetInfo.fetch();
     if (!isConnected) {
@@ -19,9 +57,11 @@ export async function syncData() {
     await syncChecklists(db);
     await syncRelatoriosGarantia(db);
     // Colaboradores
-    await syncColaboradores();
+    await syncColaboradores(db);
     // Solicitantes
-    await syncSolicitantes();
+    await syncSolicitantes(db);
+    // RDC
+    await syncRDCs(db);
 
 }
 
@@ -285,7 +325,166 @@ export async function syncSolicitantes() {
     }
 }
 
+const RDC_ENDPOINT = 'api/v1/planejamento/rdc/'; 
+export const syncRDCs = async (db) => {
+    const netInfo = await NetInfo.fetch();
+    if (!netInfo.isConnected) {
+        console.log('📵 Sem internet — RDCs sem sync agora.');
+        return;
+    }
 
+    if (!db) {
+        db = await getDb();
+    }
+    
+    console.log("📌 Iniciando Sincronização de RDCs (UP & DOWN)...");
+
+    // 1️⃣ SYNC UP: Enviar pendentes do SQLite para API
+    try {
+        const rdcPendentes = await db.getAllAsync(
+            "SELECT * FROM rdc WHERE sync_status='pending'" 
+        );
+
+        if (rdcPendentes.length === 0) {
+            console.log("✔️ Nenhum RDC pendente para envio.");
+        } else {
+            console.log(`⬆️ Enviando ${rdcPendentes.length} RDC(s) pendente(s)...`);
+
+            const updateStatements = [];
+
+            for (const rdc of rdcPendentes) {
+                const method = rdc.server_id ? 'PUT' : 'POST';
+                const endpoint = rdc.server_id ? `${RDC_ENDPOINT}${rdc.server_id}/` : RDC_ENDPOINT;
+
+                console.log(`[RDC ID ${rdc.id}] Preparando envio (${method}) para ${endpoint}`);
+                
+                try {
+                    // Monta o Payload para a API (Desserializando o JSON)
+                    let rdcsservParsed = JSON.parse(rdc.servicos_json || '[]');
+                    let rdcshhParsed = JSON.parse(rdc.hh_json || '[]');
+                    let rdcspupinParsed = JSON.parse(rdc.pin_json || '[]');
+                    
+                    // 🚨 LIMPEZA CRÍTICA: Remove os IDs locais dos filhos ANTES DE ENVIAR
+                    // Se o item for novo (POST), a ausência do ID garante que o backend o crie.
+                    // Se o item for edição (PUT), o backend atualiza baseando-se no ID do PAI.
+                    const payload = {
+                        // ... campos principais ...
+                        data: ensureString(rdc.data), 
+                        local: ensureString(rdc.local),
+                        tipo: ensureString(rdc.tipo),
+                        disciplina: ensureString(rdc.disciplina),
+                        clima: ensureString(rdc.clima),
+                        obs: rdc.obs,
+                        aprovado: rdc.aprovado === 1,
+                        encarregado: rdc.encarregado,
+                        inicio: rdc.inicio,
+                        termino: rdc.termino,
+                        doc: null, 
+
+                        // IDs de Chave Estrangeira (FKs)
+                        unidade: rdc.unidade_server_id,
+                        solicitante: rdc.solicitante_server_id,
+                        aprovador: rdc.aprovador_server_id,
+                        projeto_cod: rdc.projeto_cod_server_id,
+                        AS: rdc.AS_server_id,
+                        bm: rdc.bm_server_id,
+
+                        // Itens aninhados (Reverse FKs) - ESSENCIAL: Limpeza dos IDs locais
+                        rdcsserv: cleanNestedIds(rdcsservParsed),
+                        rdcshh: cleanNestedIds(rdcshhParsed),
+                        rdcspupin: cleanNestedIds(rdcspupinParsed),
+                    };
+                    
+                    // ... (restante da lógica de log e envio) ...
+                    console.log(`[RDC ID ${rdc.id}] Payload Nested (Servicos count): ${payload.rdcsserv.length}`);
+
+                    let response;
+                    if (rdc.server_id) {
+                        response = await api.put(endpoint, payload);
+                    } else {
+                        response = await api.post(endpoint, payload);
+                    }
+                    // ... (continua com a atualização de server_id e sync_status) ...
+                    
+                    const serverRdc = response.data;
+                    console.log(`✅ [RDC ID ${rdc.id}] Sucesso! Retornado Server ID: ${serverRdc.id}`);
+                    
+                    // Sucesso: Prepara o statement para atualizar o BD local
+                    updateStatements.push({
+                        sql: `UPDATE rdc SET 
+                                    server_id=?, sync_status='synced', updated_at=CURRENT_TIMESTAMP 
+                                WHERE id=?`,
+                        args: [serverRdc.id, rdc.id], // serverRdc.id é o ID retornado pelo servidor
+                    });
+
+                } catch (error) {
+                    console.error(`❌ [RDC ID ${rdc.id}] Erro ao enviar para API:`, error.message);
+                    if (error.response && error.response.data) {
+                        console.error(`   [RDC ID ${rdc.id}] Detalhes da API:`, JSON.stringify(error.response.data, null, 2));
+                    }
+                }
+            }
+            
+            // Executa a atualização de todos os status em lote
+            if (updateStatements.length > 0) {
+                await runBatchAsync(db, updateStatements);
+                console.log(`🎉 Envio de ${updateStatements.length} RDC(s) concluído com sucesso.`);
+            }
+        }
+    } catch (err) {
+        console.error("❌ Sync UP RDC falhou:", err.message);
+    }
+    
+    // 2️⃣ SYNC DOWN: Buscar do servidor e atualizar SQLite
+    try {
+        console.log("⬇️ Baixando RDCs do servidor...");
+        const { data: serverRDCs } = await api.get(RDC_ENDPOINT); 
+
+        // Marca todos os registros locais 'synced' como 'deleted'
+        await db.runAsync("UPDATE rdc SET sync_status = 'deleted' WHERE sync_status = 'synced'");
+        
+        const syncDownStatements = [];
+
+        for (const apiRdc of serverRDCs) {
+            // Re-serializa os arrays aninhados para JSON para armazenamento local
+            const servicos_json = JSON.stringify(apiRdc.rdcsserv || []);
+            const hh_json = JSON.stringify(apiRdc.rdcshh || []);
+            const pin_json = JSON.stringify(apiRdc.rdcspupin || []);
+
+            // Assumindo que a API retorna todos os dados, incluindo os IDs aninhados (server_id)
+            syncDownStatements.push({
+                sql: `INSERT OR REPLACE INTO rdc (
+                            server_id, data, local, tipo, disciplina, obs, aprovado, encarregado, clima, inicio, termino, doc,
+                            unidade_server_id, solicitante_server_id, aprovador_server_id, projeto_cod_server_id, AS_server_id, bm_server_id,
+                            servicos_json, hh_json, pin_json, sync_status, id 
+                        ) VALUES (
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 
+                            (SELECT id FROM rdc WHERE server_id = ?) -- Preserva o ID local se existir
+                        )`,
+                args: [
+                    apiRdc.id, apiRdc.data, apiRdc.local, apiRdc.tipo, apiRdc.disciplina, apiRdc.obs, apiRdc.aprovado ? 1 : 0, 
+                    apiRdc.encarregado, apiRdc.clima, apiRdc.inicio, apiRdc.termino, apiRdc.doc,
+                    apiRdc.unidade, apiRdc.solicitante, apiRdc.aprovador, apiRdc.projeto_cod, apiRdc.AS, apiRdc.bm,
+                    servicos_json, hh_json, pin_json, apiRdc.id
+                ]
+            });
+        }
+
+        if (syncDownStatements.length > 0) {
+            await runBatchAsync(db, syncDownStatements);
+            console.log(`📥 Banco RDC atualizado — total API: ${serverRDCs.length} RDCs`);
+        } else {
+            console.log("✔️ Nenhuma RDC nova baixada.");
+        }
+        
+        // Remove os itens locais marcados como 'deleted' que não estão mais no servidor
+        await db.runAsync("DELETE FROM rdc WHERE sync_status = 'deleted'");
+
+    } catch (err) {
+        console.error("❌ Sync DOWN RDC falhou:", err.message);
+    }
+    console.log("🔄 Sincronização de RDCs finalizada.");
+};
 
 async function syncRelatorios(db) {
     const netInfo = await NetInfo.fetch();
