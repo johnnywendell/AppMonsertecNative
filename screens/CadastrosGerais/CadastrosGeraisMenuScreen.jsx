@@ -28,12 +28,24 @@ export default function CadastrosGeraisMenuScreen({ navigation }) {
         <Text style={styles.buttonText}>Solicitantes</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.disabledButton}>
+      <TouchableOpacity
+        style={styles.button}
+        onPress={() => navigation.navigate('AprovadorList')}
+        >
         <Text style={styles.buttonText}>Aprovadores</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.disabledButton}>
+      <TouchableOpacity 
+        style={styles.button}
+        onPress={() => navigation.navigate('ItembmList')}
+        >
         <Text style={styles.buttonText}>Itens BM</Text>
+      </TouchableOpacity>
+      <TouchableOpacity 
+        style={styles.button}
+        onPress={() => navigation.navigate('ProjetoCodigoList')}
+        >
+        <Text style={styles.buttonText}>Código de projetos</Text>
       </TouchableOpacity>
     </View>
   );

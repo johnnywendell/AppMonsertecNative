@@ -15,12 +15,24 @@ export default function PlanejamentoMenuScreen({ navigation }) {
 
       {/* Aqui depois adicionaremos os outros cadastros */}
 
-      <TouchableOpacity style={styles.disabledButton}>
+      <TouchableOpacity
+        style={styles.button}
+        onPress={() => navigation.navigate('BoletimMedicaoList')}
+      >
         <Text style={styles.buttonText}>BM</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.disabledButton}>
+      <TouchableOpacity
+        style={styles.button}
+        onPress={() => navigation.navigate('ASList')}
+      >
         <Text style={styles.buttonText}>AS'S</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.button}
+        onPress={() => navigation.navigate('LevantamentoList')}
+      >
+        <Text style={styles.buttonText}>Levantamento (Pintura)</Text>
       </TouchableOpacity>
     </View>
   );

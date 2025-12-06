@@ -7,6 +7,7 @@ import { useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 
 import CustomPickerModal from '../../components/CustomPickerModal'; 
+import DatePicker from '../../components/DatePicker'; 
 // Supondo que rdcService está no mesmo nível que dataService
 import { salvarRdcLocal, buscarRdc } from '../../services/rdcService'; 
 
@@ -16,8 +17,6 @@ import {
     fetchProjetoCodigos, fetchColaboradores, fetchItemContratoOptions,
     MOCK_OPTIONS_CHOICES 
 } from '../../services/dataService'; 
-
-// --- Choices Específicas Solicitadas (RDC Filho) ---
 
 const MATERIAL_CHOICES = [
     { label: 'Perfil I', value: 'perfil_I' },
@@ -656,9 +655,16 @@ export default function RdcFormScreen({ route }) {
                     <View style={styles.row}>
                         <View style={styles.col}>
                             <Text style={styles.labelSmall}>Data</Text>
-                            <TextInput style={styles.input} placeholder="YYYY-MM-DD" value={rdc.data} 
-                                onChangeText={t => handleChange('data', t)} keyboardType="numbers-and-punctuation"/>
+                            {/* Substituímos o TextInput pelo DatePicker */}
+                            <DatePicker
+                                value={rdc.data} 
+                                onDateChange={t => handleChange('data', t)} 
+                                inputStyle={styles.input} 
+                                nullable={true} 
+                            />
                         </View>
+
+
                         <View style={styles.col}>
                             <Text style={styles.labelSmall}>Tipo</Text>
                             <TouchableOpacity style={styles.pickerPlaceholder}

@@ -325,6 +325,265 @@ export async function syncSolicitantes() {
     }
 }
 
+const APROVADORES_ENDPOINT = 'api/v1/geral/aprovadores/'; 
+export async function syncAprovadores() {
+    const { isConnected } = await NetInfo.fetch();
+    if (!isConnected) {
+        console.log('📵 Sem internet — Aprovadores sem sync agora');
+        return;
+    }
+
+    const db = await getDb();
+
+    try {
+        console.log("📌 Sincronizando Aprovadores...");
+
+        // 1️⃣ SYNC UP: Enviar pendentes do SQLite para API
+        const pendentes = await db.getAllAsync(
+            "SELECT * FROM aprovadores WHERE sync_status = 'pending'"
+        );
+
+        for (const aprovadorLocal of pendentes) {
+            try {
+                // Payload para a API (Django Serializer)
+                const payload = {
+                    aprovador: aprovadorLocal.aprovador,
+                    contrato_id: aprovadorLocal.contrato_server_id,
+                };
+
+                let resp;
+                
+                if (aprovadorLocal.server_id) {
+                    // Atualização (PUT)
+                    resp = await api.put(`${APROVADORES_ENDPOINT}${aprovadorLocal.server_id}/`, payload);
+                    console.log(`☑️ Aprovador atualizado Server ID ${aprovadorLocal.server_id}: ${aprovadorLocal.aprovador}`);
+                } else {
+                    // Criação (POST)
+                    resp = await api.post(APROVADORES_ENDPOINT, payload);
+                    console.log(`☑️ Aprovador criado Server ID ${resp.data.id}: ${aprovadorLocal.aprovador}`);
+                }
+                
+                // Atualiza o status local
+                await db.runAsync(
+                    "UPDATE aprovadores SET sync_status = 'synced', server_id = ? WHERE id = ?",
+                    [resp.data.id, aprovadorLocal.id]
+                );
+
+            } catch (e) {
+                console.warn(`⚠️ Falha ao enviar Aprovador pendente ${aprovadorLocal.aprovador}:`, e.message);
+            }
+        }
+
+        // 2️⃣ SYNC DOWN: Buscar do servidor e atualizar SQLite
+        const { data } = await api.get(APROVADORES_ENDPOINT);
+
+        // Marca todos os registros locais 'synced' como 'deleted'
+        await db.runAsync("UPDATE aprovadores SET sync_status = 'deleted' WHERE sync_status = 'synced'");
+
+        for (const apiAprovador of data) {
+            await db.runAsync(
+                `INSERT OR REPLACE INTO aprovadores (
+                    server_id, aprovador, contrato_server_id, sync_status, id 
+                ) VALUES (
+                    ?, ?, ?, 'synced', 
+                    (SELECT id FROM aprovadores WHERE server_id = ?)
+                )`,
+                [
+                    apiAprovador.id,
+                    apiAprovador.aprovador,
+                    apiAprovador.contrato, // A API deve retornar o ID do contrato
+                    apiAprovador.id // Para o subselect do ID local
+                ]
+            );
+        }
+        
+        // Remove os itens marcados como 'deleted'
+        await db.runAsync("DELETE FROM aprovadores WHERE sync_status = 'deleted'");
+
+        console.log(`📥 Banco de Aprovadores atualizado — total API: ${data.length} aprovadores`);
+
+    } catch (err) {
+        console.error("❌ Sync Aprovadores falhou:", err.message);
+    }
+}
+
+const ITEM_BM_ENDPOINT = 'api/v1/geral/itens-bm/'; // Ajuste o endpoint se necessário
+export async function syncItensBm() {
+    const { isConnected } = await NetInfo.fetch();
+    if (!isConnected) {
+        console.log('📵 Sem internet — Itens BM sem sync agora');
+        return;
+    }
+
+    const db = await getDb();
+
+    try {
+        console.log("📌 Sincronizando Itens BM...");
+
+        // 1️⃣ SYNC UP: Enviar pendentes do SQLite para API
+        const pendentes = await db.getAllAsync(
+            "SELECT * FROM itens_bm WHERE sync_status = 'pending'"
+        );
+
+        for (const itemBmLocal of pendentes) {
+            try {
+                // Payload para a API (Django Serializer)
+                const payload = {
+                    item_ref: itemBmLocal.item_ref,
+                    disciplina: itemBmLocal.disciplina,
+                    descricao: itemBmLocal.descricao,
+                    und: itemBmLocal.und,
+                    preco_item: itemBmLocal.preco_item,
+                    obs: itemBmLocal.obs,
+                    data: itemBmLocal.data, // Assumindo que está em formato string (YYYY-MM-DD)
+                    contrato_id: itemBmLocal.contrato_server_id,
+                };
+
+                let resp;
+                
+                if (itemBmLocal.server_id) {
+                    // Atualização (PUT)
+                    resp = await api.put(`${ITEM_BM_ENDPOINT}${itemBmLocal.server_id}/`, payload);
+                    console.log(`☑️ Item BM atualizado Server ID ${itemBmLocal.server_id}: ${itemBmLocal.item_ref}`);
+                } else {
+                    // Criação (POST)
+                    resp = await api.post(ITEM_BM_ENDPOINT, payload);
+                    console.log(`☑️ Item BM criado Server ID ${resp.data.id}: ${itemBmLocal.item_ref}`);
+                }
+                
+                // Atualiza o status local
+                await db.runAsync(
+                    "UPDATE itens_bm SET sync_status = 'synced', server_id = ? WHERE id = ?",
+                    [resp.data.id, itemBmLocal.id]
+                );
+
+            } catch (e) {
+                console.warn(`⚠️ Falha ao enviar Item BM pendente ${itemBmLocal.item_ref}:`, e.message);
+            }
+        }
+
+        // 2️⃣ SYNC DOWN: Buscar do servidor e atualizar SQLite
+        const { data } = await api.get(ITEM_BM_ENDPOINT);
+
+        // Marca todos os registros locais 'synced' como 'deleted'
+        await db.runAsync("UPDATE itens_bm SET sync_status = 'deleted' WHERE sync_status = 'synced'");
+
+        for (const apiItemBm of data) {
+            await db.runAsync(
+                `INSERT OR REPLACE INTO itens_bm (
+                    server_id, item_ref, disciplina, descricao, und, preco_item, obs, data, contrato_server_id, sync_status, id 
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 
+                    (SELECT id FROM itens_bm WHERE server_id = ?)
+                )`,
+                [
+                    apiItemBm.id,
+                    apiItemBm.item_ref,
+                    apiItemBm.disciplina,
+                    apiItemBm.descricao,
+                    apiItemBm.und,
+                    apiItemBm.preco_item,
+                    apiItemBm.obs,
+                    apiItemBm.data, // Assumindo que a API retorna em formato compatível com SQLite (string)
+                    apiItemBm.contrato, // A API deve retornar o ID do contrato
+                    apiItemBm.id // Para o subselect do ID local
+                ]
+            );
+        }
+        
+        // Remove os itens marcados como 'deleted'
+        await db.runAsync("DELETE FROM itens_bm WHERE sync_status = 'deleted'");
+
+        console.log(`📥 Banco de Itens BM atualizado — total API: ${data.length} itens.`);
+
+    } catch (err) {
+        console.error("❌ Sync Itens BM falhou:", err.message);
+    }
+}
+
+
+const PROJETO_CODIGO_ENDPOINT = 'api/v1/planejamento/projetocodigo/';
+const PROJETO_CODIGO_TABLE = 'projeto_codigos'; 
+export async function syncProjetoCodigos() {
+    const { isConnected } = await NetInfo.fetch();
+    if (!isConnected) {
+        console.log('📵 Sem internet — Códigos de Projeto sem sync agora');
+        return;
+    }
+
+    const db = await getDb();
+
+    try {
+        console.log("📌 Sincronizando Códigos de Projeto...");
+
+        // 1️⃣ SYNC UP: Enviar pendentes do SQLite para API
+        const pendentes = await db.getAllAsync(
+            `SELECT * FROM ${PROJETO_CODIGO_TABLE} WHERE sync_status = 'pending' OR sync_status = 'update_pending'`
+        );
+
+        for (const projetoLocal of pendentes) {
+            try {
+                // Payload para a API (Django Serializer)
+                const payload = {
+                    projeto_nome: projetoLocal.projeto_nome,
+                    contrato_id: projetoLocal.contrato_server_id,
+                };
+
+                let resp;
+                
+                if (projetoLocal.server_id) {
+                    // Atualização (PUT)
+                    resp = await api.put(`${PROJETO_CODIGO_ENDPOINT}${projetoLocal.server_id}/`, payload);
+                    console.log(`☑️ Código de Projeto atualizado Server ID ${projetoLocal.server_id}: ${projetoLocal.projeto_nome}`);
+                } else {
+                    // Criação (POST)
+                    resp = await api.post(PROJETO_CODIGO_ENDPOINT, payload);
+                    console.log(`☑️ Código de Projeto criado Server ID ${resp.data.id}: ${projetoLocal.projeto_nome}`);
+                }
+                
+                // Atualiza o status local
+                await db.runAsync(
+                    `UPDATE ${PROJETO_CODIGO_TABLE} SET sync_status = 'synced', server_id = ? WHERE id = ?`,
+                    [resp.data.id, projetoLocal.id]
+                );
+
+            } catch (e) {
+                console.warn(`⚠️ Falha ao enviar Código de Projeto pendente ${projetoLocal.projeto_nome}:`, e.message);
+            }
+        }
+
+        // 2️⃣ SYNC DOWN: Buscar do servidor e atualizar SQLite
+        const { data } = await api.get(PROJETO_CODIGO_ENDPOINT);
+
+        // Marca todos os registros locais 'synced' como 'deleted'
+        await db.runAsync(`UPDATE ${PROJETO_CODIGO_TABLE} SET sync_status = 'deleted' WHERE sync_status = 'synced'`);
+
+        for (const apiProjeto of data) {
+            await db.runAsync(
+                `INSERT OR REPLACE INTO ${PROJETO_CODIGO_TABLE} (
+                    server_id, projeto_nome, contrato_server_id, sync_status, id 
+                ) VALUES (
+                    ?, ?, ?, 'synced', 
+                    (SELECT id FROM ${PROJETO_CODIGO_TABLE} WHERE server_id = ?) -- Preserva o ID local
+                )`,
+                [
+                    apiProjeto.id,
+                    apiProjeto.projeto_nome,
+                    apiProjeto.contrato_id, // Assumindo que a API retorna 'contrato_id'
+                    apiProjeto.id // Para o subselect do ID local
+                ]
+            );
+        }
+        
+        // Remove os itens marcados como 'deleted'
+        await db.runAsync(`DELETE FROM ${PROJETO_CODIGO_TABLE} WHERE sync_status = 'deleted'`);
+
+        console.log(`📥 Banco de Códigos de Projeto atualizado — total API: ${data.length} códigos`);
+
+    } catch (err) {
+        console.error("❌ Sync Códigos de Projeto falhou:", err.message);
+    }
+}
 const RDC_ENDPOINT = 'api/v1/planejamento/rdc/'; 
 export const syncRDCs = async (db) => {
     const netInfo = await NetInfo.fetch();
@@ -485,6 +744,363 @@ export const syncRDCs = async (db) => {
     }
     console.log("🔄 Sincronização de RDCs finalizada.");
 };
+
+const LEVANTAMENTO_ENDPOINT = 'api/v1/planejamento/levantamento/';
+const LEVANTAMENTO_TABLE = 'levantamento';
+const PINTURA_CHILD_KEY = 'itens_pintura'; // Nome do campo aninhado no Serializer/API
+const PINTURA_JSON_COLUMN = 'itens_pintura_json'; // Nome da coluna JSON no SQLite
+export const syncLevantamento = async (db) => {
+    const netInfo = await NetInfo.fetch();
+    if (!netInfo.isConnected) {
+        console.log('📵 Sem internet — Levantamentos sem sync agora.');
+        return;
+    }
+
+    if (!db) {
+        db = await getDb();
+    }
+    
+    console.log("📌 Iniciando Sincronização de Levantamentos (UP & DOWN)...");
+
+    // 1️⃣ SYNC UP: Enviar pendentes do SQLite para API
+    try {
+        const levantamentosPendentes = await db.getAllAsync(
+            `SELECT * FROM ${LEVANTAMENTO_TABLE} WHERE sync_status='pending'` 
+        );
+
+        if (levantamentosPendentes.length === 0) {
+            console.log("✔️ Nenhum Levantamento pendente para envio.");
+        } else {
+            console.log(`⬆️ Enviando ${levantamentosPendentes.length} Levantamento(s) pendente(s)...`);
+
+            const updateStatements = [];
+
+            for (const lvt of levantamentosPendentes) {
+                const method = lvt.server_id ? 'PUT' : 'POST';
+                const endpoint = lvt.server_id ? `${LEVANTAMENTO_ENDPOINT}${lvt.server_id}/` : LEVANTAMENTO_ENDPOINT;
+
+                console.log(`[LVT ID ${lvt.id}] Preparando envio (${method}) para ${endpoint}`);
+                
+                try {
+                    // Monta o Payload para a API (Desserializando o JSON do item filho)
+                    let itensPinturaParsed = JSON.parse(lvt[PINTURA_JSON_COLUMN] || '[]');
+                    
+                    // 🚨 LIMPEZA CRÍTICA: Remove os IDs locais dos filhos ANTES DE ENVIAR
+                    const payload = {
+                        // ... campos principais do Levantamento ...
+                        data: lvt.data, 
+                        escopo: lvt.escopo,
+                        local: lvt.local,
+                        // doc: lvt.doc, // Arquivos devem ser tratados com FormData, mas mantemos nulo aqui por simplicidade
+
+                        // IDs de Chave Estrangeira (FKs)
+                        auth_serv: lvt.auth_serv_server_id,
+                        unidade: lvt.unidade_server_id,
+                        projeto_cod: lvt.projeto_cod_server_id,
+
+                        // Itens aninhados (Reverse FK) - ESSENCIAL: Limpeza dos IDs locais
+                        [PINTURA_CHILD_KEY]: cleanNestedIds(itensPinturaParsed),
+                    };
+                    
+                    console.log(`[LVT ID ${lvt.id}] Payload Nested (${PINTURA_CHILD_KEY} count): ${payload[PINTURA_CHILD_KEY].length}`);
+
+                    let response;
+                    if (lvt.server_id) {
+                        response = await api.put(endpoint, payload);
+                    } else {
+                        response = await api.post(endpoint, payload);
+                    }
+                    
+                    const serverLvt = response.data;
+                    console.log(`✅ [LVT ID ${lvt.id}] Sucesso! Retornado Server ID: ${serverLvt.id}`);
+                    
+                    // Sucesso: Prepara o statement para atualizar o BD local
+                    updateStatements.push({
+                        sql: `UPDATE ${LEVANTAMENTO_TABLE} SET 
+                                    server_id=?, sync_status='synced', updated_at=CURRENT_TIMESTAMP 
+                                WHERE id=?`,
+                        args: [serverLvt.id, lvt.id], // serverLvt.id é o ID retornado pelo servidor
+                    });
+
+                } catch (error) {
+                    console.error(`❌ [LVT ID ${lvt.id}] Erro ao enviar para API:`, error.message);
+                    if (error.response && error.response.data) {
+                        console.error(`   [LVT ID ${lvt.id}] Detalhes da API:`, JSON.stringify(error.response.data, null, 2));
+                    }
+                }
+            }
+            
+            // Executa a atualização de todos os status em lote
+            if (updateStatements.length > 0) {
+                await runBatchAsync(db, updateStatements);
+                console.log(`🎉 Envio de ${updateStatements.length} Levantamento(s) concluído com sucesso.`);
+            }
+        }
+    } catch (err) {
+        console.error("❌ Sync UP Levantamento falhou:", err.message);
+    }
+    
+    // 2️⃣ SYNC DOWN: Buscar do servidor e atualizar SQLite
+    try {
+        console.log("⬇️ Baixando Levantamentos do servidor...");
+        const { data: serverLvts } = await api.get(LEVANTAMENTO_ENDPOINT); 
+
+        // Marca todos os registros locais 'synced' como 'deleted'
+        await db.runAsync(`UPDATE ${LEVANTAMENTO_TABLE} SET sync_status = 'deleted' WHERE sync_status = 'synced'`);
+        
+        const syncDownStatements = [];
+
+        for (const apiLvt of serverLvts) {
+            // Re-serializa o array aninhado para JSON para armazenamento local
+            const pintura_json = JSON.stringify(apiLvt[PINTURA_CHILD_KEY] || []);
+
+            // Assumindo que a API retorna todos os dados, incluindo os IDs aninhados (server_id)
+            syncDownStatements.push({
+                sql: `INSERT OR REPLACE INTO ${LEVANTAMENTO_TABLE} (
+                            server_id, data, escopo, local, doc,
+                            auth_serv_server_id, unidade_server_id, projeto_cod_server_id,
+                            ${PINTURA_JSON_COLUMN}, sync_status, id 
+                        ) VALUES (
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 
+                            (SELECT id FROM ${LEVANTAMENTO_TABLE} WHERE server_id = ?) 
+                        )`,
+                args: [
+                    apiLvt.id, apiLvt.data, apiLvt.escopo, apiLvt.local, apiLvt.doc,
+                    apiLvt.auth_serv, apiLvt.unidade, apiLvt.projeto_cod,
+                    pintura_json, apiLvt.id
+                ]
+            });
+        }
+
+        if (syncDownStatements.length > 0) {
+            await runBatchAsync(db, syncDownStatements);
+            console.log(`📥 Banco Levantamento atualizado — total API: ${serverLvts.length} Levantamentos`);
+        } else {
+            console.log("✔️ Nenhum Levantamento novo baixado.");
+        }
+        
+        // Remove os itens locais marcados como 'deleted' que não estão mais no servidor
+        await db.runAsync(`DELETE FROM ${LEVANTAMENTO_TABLE} WHERE sync_status = 'deleted'`);
+
+    } catch (err) {
+        console.error("❌ Sync DOWN Levantamento falhou:", err.message);
+    }
+    console.log("🔄 Sincronização de Levantamentos finalizada.");
+};
+
+
+const AS_ENDPOINT = 'api/v1/planejamento/as/'; // Ajuste o endpoint conforme sua API
+export async function syncAS() {
+    const { isConnected } = await NetInfo.fetch();
+    if (!isConnected) {
+        console.log('📵 Sem internet — ASs sem sync agora');
+        return;
+    }
+
+    const db = await getDb();
+
+    try {
+        console.log("📌 Sincronizando ASs...");
+
+        // 1️⃣ SYNC UP: Enviar pendentes do SQLite para API
+        const pendentes = await db.getAllAsync(
+            "SELECT * FROM ass WHERE sync_status = 'pending' OR sync_status = 'update_pending'"
+        );
+
+        for (const asLocal of pendentes) {
+            try {
+                // Monta o Payload para o Django (usando server_id das FKs)
+                const payload = {
+                    data: asLocal.data,
+                    status_as: asLocal.status_as,
+                    tipo: asLocal.tipo,
+                    disciplina: asLocal.disciplina,
+                    escopo: asLocal.escopo,
+                    local: asLocal.local,
+                    obs: asLocal.obs,
+                    rev: asLocal.rev,
+                    as_sap: asLocal.as_sap,
+                    as_antiga: asLocal.as_antiga,
+                    
+                    // Chaves Estrangeiras (Mapeamento direto para IDs do Servidor)
+                    unidade_id: asLocal.unidade_server_id,
+                    solicitante_id: asLocal.solicitante_server_id,
+                    aprovador_id: asLocal.aprovador_server_id,
+                    projeto_cod_id: asLocal.projeto_cod_server_id,
+                };
+
+                let resp;
+                
+                if (asLocal.server_id) {
+                    // Atualização (PUT)
+                    resp = await api.put(`${AS_ENDPOINT}${asLocal.server_id}/`, payload);
+                    console.log(`☑️ AS atualizada Server ID ${asLocal.server_id}`);
+                } else {
+                    // Criação (POST)
+                    resp = await api.post(AS_ENDPOINT, payload);
+                    console.log(`☑️ AS criada Server ID ${resp.data.id}`);
+                }
+                
+                // Atualiza o status local
+                await db.runAsync(
+                    "UPDATE ass SET sync_status = 'synced', server_id = ? WHERE id = ?",
+                    [resp.data.id, asLocal.id]
+                );
+
+            } catch (e) {
+                console.warn(`⚠️ Falha ao enviar AS pendente ID ${asLocal.id}:`, e.message);
+            }
+        }
+
+        // 2️⃣ SYNC DOWN: Buscar do servidor e atualizar SQLite
+        const { data } = await api.get(AS_ENDPOINT);
+
+        // Marca todos os registros locais 'synced' como 'deleted'
+        await db.runAsync("UPDATE ass SET sync_status = 'deleted' WHERE sync_status = 'synced'");
+
+        await db.withTransactionAsync(async () => {
+             for (const apiAs of data) {
+                await db.runAsync(
+                    `INSERT OR REPLACE INTO ass (
+                        server_id, unidade_server_id, solicitante_server_id, aprovador_server_id, projeto_cod_server_id,
+                        data, status_as, tipo, disciplina, escopo, local, obs, rev, as_sap, as_antiga,
+                        sync_status, id 
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 
+                        (SELECT id FROM ass WHERE server_id = ?) 
+                    )`,
+                    [
+                        apiAs.id, 
+                        apiAs.unidade, // ID do servidor
+                        apiAs.solicitante, // ID do servidor
+                        apiAs.aprovador, // ID do servidor
+                        apiAs.projeto_cod, // ID do servidor
+                        apiAs.data, apiAs.status_as, apiAs.tipo, apiAs.disciplina, apiAs.escopo, 
+                        apiAs.local, apiAs.obs, apiAs.rev, apiAs.as_sap, apiAs.as_antiga,
+                        apiAs.id 
+                    ]
+                );
+            }
+        });
+       
+        // Remove os itens marcados como 'deleted'
+        await db.runAsync("DELETE FROM ass WHERE sync_status = 'deleted'");
+
+        console.log(`📥 Banco de ASs atualizado — total API: ${data.length} ASs`);
+
+    } catch (err) {
+        console.error("❌ Sync ASs falhou:", err.message);
+    }
+}
+const BM_ENDPOINT = 'api/v1/planejamento/boletimmedicao/'; // Ajuste o endpoint conforme sua API
+export async function syncBoletimMedicao() {
+    const { isConnected } = await NetInfo.fetch();
+    if (!isConnected) {
+        console.log('📵 Sem internet — BMs sem sync agora');
+        return;
+    }
+
+    const db = await getDb();
+
+    try {
+        console.log("📌 Sincronizando BMs...");
+
+        // 1️⃣ SYNC UP: Enviar pendentes do SQLite para API
+        const pendentes = await db.getAllAsync(
+            "SELECT * FROM boletim_medicoes WHERE sync_status = 'pending' OR sync_status = 'update_pending'"
+        );
+
+        for (const bmLocal of pendentes) {
+            try {
+                // Monta o Payload para o Django (usando server_id das FKs)
+                const payload = {
+                    periodo_inicio: bmLocal.periodo_inicio,
+                    periodo_fim: bmLocal.periodo_fim,
+                    status_pgt: bmLocal.status_pgt,
+                    status_med: bmLocal.status_med,
+                    d_numero: bmLocal.d_numero,
+                    d_data: bmLocal.d_data,
+                    d_status: bmLocal.d_status,
+                    b_numero: bmLocal.b_numero,
+                    b_data: bmLocal.b_data,
+                    b_status: bmLocal.b_status,
+                    descricao: bmLocal.descricao,
+                    valor: bmLocal.valor,
+                    follow_up: bmLocal.follow_up,
+                    rev: bmLocal.rev,
+                    
+                    // Chaves Estrangeiras (Mapeamento direto para IDs do Servidor)
+                    unidade_id: bmLocal.unidade_server_id,
+                    projeto_cod_id: bmLocal.projeto_cod_server_id,
+                    d_aprovador_id: bmLocal.d_aprovador_server_id,
+                    b_aprovador_id: bmLocal.b_aprovador_server_id,
+                };
+
+                let resp;
+                
+                if (bmLocal.server_id) {
+                    // Atualização (PUT)
+                    resp = await api.put(`${BM_ENDPOINT}${bmLocal.server_id}/`, payload);
+                    console.log(`☑️ BM atualizado Server ID ${bmLocal.server_id}`);
+                } else {
+                    // Criação (POST)
+                    resp = await api.post(BM_ENDPOINT, payload);
+                    console.log(`☑️ BM criado Server ID ${resp.data.id}`);
+                }
+                
+                // Atualiza o status local
+                await db.runAsync(
+                    "UPDATE boletim_medicoes SET sync_status = 'synced', server_id = ? WHERE id = ?",
+                    [resp.data.id, bmLocal.id]
+                );
+
+            } catch (e) {
+                console.warn(`⚠️ Falha ao enviar BM pendente ID ${bmLocal.id}:`, e.message);
+            }
+        }
+
+        // 2️⃣ SYNC DOWN: Buscar do servidor e atualizar SQLite
+        const { data } = await api.get(BM_ENDPOINT);
+
+        // Marca todos os registros locais 'synced' como 'deleted'
+        await db.runAsync("UPDATE boletim_medicoes SET sync_status = 'deleted' WHERE sync_status = 'synced'");
+
+        await db.withTransactionAsync(async () => {
+            for (const apiBm of data) {
+                await db.runAsync(
+                    `INSERT OR REPLACE INTO boletim_medicoes (
+                        server_id, unidade_server_id, projeto_cod_server_id, d_aprovador_server_id, b_aprovador_server_id,
+                        periodo_inicio, periodo_fim, status_pgt, status_med, d_numero, d_data, d_status, b_numero, b_data, b_status,
+                        descricao, valor, follow_up, rev, sync_status, id 
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 
+                        (SELECT id FROM boletim_medicoes WHERE server_id = ?) 
+                    )`,
+                    [
+                        apiBm.id, 
+                        apiBm.unidade, // ID do servidor
+                        apiBm.projeto_cod, // ID do servidor
+                        apiBm.d_aprovador, // ID do servidor
+                        apiBm.b_aprovador, // ID do servidor
+                        apiBm.periodo_inicio, apiBm.periodo_fim, apiBm.status_pgt, apiBm.status_med, 
+                        apiBm.d_numero, apiBm.d_data, apiBm.d_status, apiBm.b_numero, apiBm.b_data, apiBm.b_status,
+                        apiBm.descricao, apiBm.valor, apiBm.follow_up, apiBm.rev,
+                        apiBm.id 
+                    ]
+                );
+            }
+        });
+        
+        // Remove os itens marcados como 'deleted'
+        await db.runAsync("DELETE FROM boletim_medicoes WHERE sync_status = 'deleted'");
+
+        console.log(`📥 Banco de BMs atualizado — total API: ${data.length} BMs`);
+
+    } catch (err) {
+        console.error("❌ Sync BMs falhou:", err.message);
+    }
+}
+
 
 async function syncRelatorios(db) {
     const netInfo = await NetInfo.fetch();

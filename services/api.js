@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { getStoredTokens, refreshAccessToken, clearTokens } from './authService';
 
-export const BASE_URL = 'http://192.168.0.6:8000/';
+export const BASE_URL = 'http://192.168.0.5:8000/';
 
 export const api = axios.create({
   baseURL: BASE_URL,

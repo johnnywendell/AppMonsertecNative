@@ -61,7 +61,7 @@ const DrawerRoutes = () => {
                     name="RecursosHumanos"
                     component={RecursosHumanosStack}
                     options={{
-                        drawerLabel: 'Recursos Humanos',
+                        drawerLabel: 'Apontamentos',
                         drawerIcon: ({ color, size }) => (
                             <MaterialCommunityIcons name="account-group" size={size} color={color} />
                         ),

@@ -1,24 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { listarAprovadores } from '../../services/aprovadorService'; // Importação do serviço de Aprovador
-import { MaterialIcons } from '@expo/vector-icons';
+import { listarProjetoCodigos } from '../../services/projetoCodigoService'; // Importa o novo serviço
+import { MaterialIcons } from '@expo/vector-icons'; // Ícones para o botão
 
-export default function AprovadorListScreen() {
+export default function ProjetoCodigoListScreen() {
     const navigation = useNavigation();
-    const [aprovadores, setAprovadores] = useState([]);
+    const [projetos, setProjetos] = useState([]); // Mudança: areas -> projetos
     const [loading, setLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
 
     // Função para buscar os dados e atualizar a lista
-    const fetchAprovadores = async () => {
+    const fetchProjetoCodigos = async () => {
         try {
-            // O listarAprovadores já lida com a sincronização em background
-            const data = await listarAprovadores();
-            setAprovadores(data);
+            // Mudança: listarAreas() -> listarProjetoCodigos()
+            const data = await listarProjetoCodigos(); 
+            setProjetos(data);
         } catch (error) {
-            console.error('Erro ao buscar lista de Aprovadores:', error);
-            // Poderíamos adicionar um MessageModal aqui para notificar o usuário
+            console.error('Erro ao buscar lista de Códigos de Projeto:', error);
         } finally {
             setLoading(false);
             setIsRefreshing(false);
@@ -29,24 +28,23 @@ export default function AprovadorListScreen() {
     useFocusEffect(
         React.useCallback(() => {
             setLoading(true);
-            fetchAprovadores();
+            fetchProjetoCodigos();
         }, [])
     );
 
     const handleRefresh = () => {
         setIsRefreshing(true);
-        fetchAprovadores();
+        fetchProjetoCodigos();
     };
 
     const handleEdit = (id) => {
-        // Navega para a tela de formulário com o ID para edição
-        // Você deve garantir que 'AprovadorForm' está na sua navegação
-        navigation.navigate('AprovadorForm', { id: id });
+        // Mudança: 'AreaForm' -> 'ProjetoCodigoForm'
+        navigation.navigate('ProjetoCodigoForm', { id: id }); 
     };
 
     const handleCreate = () => {
-        // Navega para a tela de formulário sem ID para criação
-        navigation.navigate('AprovadorForm');
+        // Mudança: 'AreaForm' -> 'ProjetoCodigoForm'
+        navigation.navigate('ProjetoCodigoForm');
     };
 
     const renderItem = ({ item }) => (
@@ -56,7 +54,9 @@ export default function AprovadorListScreen() {
             activeOpacity={0.8}
         >
             <View style={styles.textContainer}>
-                <Text style={styles.itemName}>{item.aprovador}</Text>
+                {/* Mudança: item.area -> item.projeto_nome */}
+                <Text style={styles.itemName}>{item.projeto_nome}</Text> 
+                
                 {/* Exibe o status de sync (opcional) */}
                 <Text style={styles.syncStatusText}>
                     Status: {item.sync_status === 'pending' ? '🟡 Pendente' : '🟢 Sincronizado'}
@@ -66,14 +66,14 @@ export default function AprovadorListScreen() {
         </TouchableOpacity>
     );
 
-    if (loading && aprovadores.length === 0) {
+    if (loading && projetos.length === 0) {
         return <ActivityIndicator size="large" color="#00315c" style={styles.loading} />;
     }
 
     return (
         <View style={styles.container}>
             <FlatList
-                data={aprovadores}
+                data={projetos} // Mudança: areas -> projetos
                 renderItem={renderItem}
                 keyExtractor={(item) => item.id.toString()}
                 contentContainerStyle={styles.listContent}
@@ -81,7 +81,7 @@ export default function AprovadorListScreen() {
                 onRefresh={handleRefresh}
                 ListEmptyComponent={() => (
                     !loading && (
-                        <Text style={styles.emptyText}>Nenhum Aprovador cadastrado. Crie um!</Text>
+                        <Text style={styles.emptyText}>Nenhum Código de Projeto cadastrado. Crie um!</Text>
                     )
                 )}
             />
@@ -98,7 +98,7 @@ export default function AprovadorListScreen() {
     );
 }
 
-// Estilos mantidos, com pequenas adaptações no nome do estilo principal de texto
+// --- ESTILOS (Ajustados para consistência) ---
 const styles = StyleSheet.create({
     container: {
         flex: 1,
@@ -132,7 +132,8 @@ const styles = StyleSheet.create({
         flex: 1,
         marginRight: 10,
     },
-    itemName: { // Alterado de areaName para itemName
+    // Mudança: areaName -> itemName
+    itemName: { 
         fontSize: 16,
         fontWeight: '600',
         color: '#333',

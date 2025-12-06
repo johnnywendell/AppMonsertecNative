@@ -116,6 +116,19 @@ export async function setupDatabase() {
                 FOREIGN KEY (contrato_id) REFERENCES contratos(id) ON DELETE SET NULL
             );
         `);
+        await database.execAsync(`
+            CREATE TABLE IF NOT EXISTS projeto_codigos (
+                id INTEGER PRIMARY KEY NOT NULL,
+                projeto_nome TEXT NOT NULL, 
+                contrato_id INTEGER,
+                contrato_server_id INTEGER, 
+                server_id INTEGER UNIQUE,
+                sync_status TEXT DEFAULT 'synced',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                FOREIGN KEY (contrato_id) REFERENCES contratos(id) ON DELETE SET NULL
+            );
+        `);
         // --- TABELA SOLICITANTES (NOVA) ---
         await database.execAsync(`
             CREATE TABLE IF NOT EXISTS solicitantes (
@@ -127,6 +140,42 @@ export async function setupDatabase() {
                 sync_status TEXT DEFAULT 'synced',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                FOREIGN KEY (contrato_id) REFERENCES contratos(id) ON DELETE SET NULL
+            );
+        `);
+        await database.execAsync(`
+            CREATE TABLE IF NOT EXISTS aprovadores (
+                id INTEGER PRIMARY KEY NOT NULL,
+                aprovador TEXT NOT NULL UNIQUE,
+                contrato_id INTEGER,
+                contrato_server_id INTEGER,
+                server_id INTEGER UNIQUE,
+                sync_status TEXT DEFAULT 'synced',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                FOREIGN KEY (contrato_id) REFERENCES contratos(id) ON DELETE SET NULL
+            );
+        `);
+        await database.execAsync(`
+            CREATE TABLE IF NOT EXISTS itens_bm (
+                id INTEGER PRIMARY KEY NOT NULL,
+                item_ref TEXT NOT NULL,
+                disciplina TEXT NOT NULL,
+                descricao TEXT NOT NULL,
+                und TEXT NOT NULL,
+                preco_item REAL NOT NULL,
+                obs TEXT,
+                data TEXT NOT NULL,
+                contrato_id INTEGER,
+                contrato_server_id INTEGER,
+                server_id INTEGER UNIQUE,
+                sync_status TEXT DEFAULT 'synced',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                
+                -- Garante que o item_ref é único para um dado contrato, refletindo o Django
+                UNIQUE (item_ref, contrato_server_id), 
+
                 FOREIGN KEY (contrato_id) REFERENCES contratos(id) ON DELETE SET NULL
             );
         `);
@@ -169,6 +218,117 @@ export async function setupDatabase() {
                 sync_status TEXT DEFAULT 'synced', -- synced, pending, failed
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP 
+            );
+        `);
+        await database.execAsync(`
+                CREATE TABLE IF NOT EXISTS levantamento (
+                    id INTEGER PRIMARY KEY NOT NULL,
+                    
+                    -- Campos principais do Levantamento (Django Model: Levantamento)
+                    data DATE,
+                    escopo TEXT, -- Escopo do serviço
+                    local TEXT,  -- Local do serviço
+                    doc TEXT,    -- Armazena o path/url do documento
+                    
+                    -- Chaves Estrangeiras (Armazenando o ID do Servidor)
+                    -- auth_serv (AS)
+                    auth_serv_server_id INTEGER, 
+                    -- unidade (Area)
+                    unidade_server_id INTEGER,
+                    -- projeto_cod (ProjetoCodigo)
+                    projeto_cod_server_id INTEGER,
+                    
+                    -- Campo JSON para os ITENS FILHOS ANINHADOS
+                    -- O array de ItemLevantamentoPintura é armazenado aqui como JSON string.
+                    itens_pintura_json TEXT, 
+
+                    -- Campos de Sincronização
+                    server_id INTEGER UNIQUE,
+                    sync_status TEXT DEFAULT 'synced', -- synced, pending, deleted, failed
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP 
+                );
+            `);
+        await database.execAsync(`
+                CREATE TABLE IF NOT EXISTS boletim_medicoes (
+                    id INTEGER PRIMARY KEY NOT NULL,
+                    
+                    -- Campos de Chave Estrangeira (FKs)
+                    unidade_id INTEGER,
+                    unidade_server_id INTEGER,
+                    projeto_cod_id INTEGER,
+                    projeto_cod_server_id INTEGER,
+                    d_aprovador_id INTEGER,
+                    d_aprovador_server_id INTEGER,
+                    b_aprovador_id INTEGER,
+                    b_aprovador_server_id INTEGER,
+
+                    -- Campos de Dados
+                    periodo_inicio DATE NOT NULL,
+                    periodo_fim DATE NOT NULL,
+                    status_pgt TEXT,
+                    status_med TEXT,
+                    d_numero TEXT,
+                    d_data DATE,
+                    d_status TEXT,
+                    b_numero TEXT,
+                    b_data DATE,
+                    b_status TEXT,
+                    descricao TEXT NOT NULL,
+                    valor REAL,
+                    follow_up TEXT,
+                    rev INTEGER,
+                    
+                    -- Campos de Sincronização
+                    server_id INTEGER UNIQUE,
+                    sync_status TEXT DEFAULT 'synced',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                    
+                    -- FKs Locais (opcional, mas bom para integridade local)
+                    FOREIGN KEY (unidade_id) REFERENCES areas(id) ON DELETE SET NULL,
+                    FOREIGN KEY (projeto_cod_id) REFERENCES projetos_codigos(id) ON DELETE SET NULL,
+                    FOREIGN KEY (d_aprovador_id) REFERENCES aprovadores(id) ON DELETE SET NULL,
+                    FOREIGN KEY (b_aprovador_id) REFERENCES aprovadores(id) ON DELETE SET NULL
+                );
+            `);
+        await database.execAsync(`
+            CREATE TABLE IF NOT EXISTS ass (
+                id INTEGER PRIMARY KEY NOT NULL,
+
+                -- Campos de Chave Estrangeira (FKs)
+                unidade_id INTEGER,
+                unidade_server_id INTEGER,
+                solicitante_id INTEGER,
+                solicitante_server_id INTEGER,
+                aprovador_id INTEGER,
+                aprovador_server_id INTEGER,
+                projeto_cod_id INTEGER,
+                projeto_cod_server_id INTEGER,
+                
+                -- Campos de Dados
+                data DATE NOT NULL,
+                status_as TEXT,
+                tipo TEXT NOT NULL,
+                disciplina TEXT NOT NULL,
+                escopo TEXT,
+                local TEXT,
+                obs TEXT,
+                rev INTEGER,
+                as_sap TEXT,
+                as_antiga TEXT,
+
+                -- Campos de Sincronização
+                server_id INTEGER UNIQUE,
+                sync_status TEXT DEFAULT 'synced',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                
+                -- FKs Locais (opcional)
+                FOREIGN KEY (unidade_id) REFERENCES areas(id) ON DELETE SET NULL,
+                FOREIGN KEY (solicitante_id) REFERENCES solicitantes(id) ON DELETE CASCADE,
+                FOREIGN KEY (aprovador_id) REFERENCES aprovadores(id) ON DELETE SET NULL,
+                FOREIGN KEY (projeto_cod_id) REFERENCES projetos_codigos(id) ON DELETE SET NULL
             );
         `);
                 

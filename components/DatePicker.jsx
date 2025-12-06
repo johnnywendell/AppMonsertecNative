@@ -3,75 +3,103 @@ import {
     View, Text, TouchableOpacity, StyleSheet, Platform 
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-// Importa o seletor de data específico para React Native
 import DateTimePicker from '@react-native-community/datetimepicker'; 
 
-// Importa a formatação nativa (mantendo a data-fns fora daqui por enquanto)
-const formatDate = (date) => {
-    if (!date) return 'Selecione a Data';
-    // Garante que é um objeto Date
-    const d = date instanceof Date ? date : new Date(date);
+// --- FUNÇÃO AUXILIAR DE FORMATAÇÃO ---
+const formatDate = (dateString) => {
+    if (!dateString) return 'Selecione a Data';
+    
+    // Converte a string YYYY-MM-DD para um objeto Date para formatação
+    // Adiciona T00:00:00 para evitar problemas com fuso horário (Timezone)
+    const d = new Date(`${dateString}T00:00:00`); 
     
     // Formato DD/MM/YYYY
     const day = String(d.getDate()).padStart(2, '0');
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const year = d.getFullYear();
+    
     return `${day}/${month}/${year}`;
 };
 
 
 /**
  * @typedef {Object} DatePickerProps
- * @property {Date} value - O valor da data atualmente selecionado (objeto Date).
- * @property {function(Date): void} onChange - Função chamada quando a data muda.
- * @property {string} [label='Data'] - O rótulo a ser exibido acima do campo.
+ * @property {string | null} value - O valor da data atualmente selecionado (string YYYY-MM-DD ou null).
+ * @property {function(string | null): void} onDateChange - Função chamada quando a data muda (retorna string YYYY-MM-DD ou null).
+ * @property {string} [label='Data'] - Este label não será renderizado, mas é mantido nas props se o componente pai quiser usá-lo para algo.
+ * @property {boolean} [nullable=false] - Se true, permite que o usuário limpe o campo.
  */
 
 /**
  * Componente de entrada de data que utiliza o DateTimePicker nativo 
- * e exibe o modal de seleção quando o campo é pressionado.
  *
  * @param {DatePickerProps} props 
  * @returns {JSX.Element}
  */
-export default function DatePicker({ value, onChange, label = 'Data' }) {
-    // Estado para controlar a visibilidade do seletor nativo
+export default function DatePicker({ value, onDateChange, label = 'Data', nullable = false }) {
+    
     const [showPicker, setShowPicker] = useState(false);
 
+    // Converte a string de entrada (value) em um objeto Date para passar ao DateTimePicker
+    const dateObject = value ? new Date(`${value}T00:00:00`) : new Date();
+
+    // Funções de manipulação
+    const handleOpenPicker = () => setShowPicker(true);
+    
+    const handleClearDate = () => {
+        onDateChange(null);
+    };
+
     const handleDateChange = (event, selectedDate) => {
-        // O seletor deve ser fechado após a seleção (ou cancelamento no Android)
-        setShowPicker(Platform.OS === 'ios'); 
+        // Fecha o seletor em todas as plataformas
+        setShowPicker(false); 
 
         if (event.type === 'set' && selectedDate) {
-            // Apenas atualiza se o usuário selecionou uma data (set)
-            onChange(selectedDate);
+            // Converte o objeto Date (output do picker nativo) de volta para a string YYYY-MM-DD
+            const year = selectedDate.getFullYear();
+            const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+            const day = String(selectedDate.getDate()).padStart(2, '0');
+            const dateString = `${year}-${month}-${day}`;
+            
+            // Chama o callback do componente pai com a string YYYY-MM-DD
+            onDateChange(dateString);
         }
+        // Não precisamos tratar o 'dismissed' no Android explicitamente aqui, já que o setShowPicker(false) cuida disso.
     };
 
     const displayValue = formatDate(value);
     
     return (
         <View style={styles.container}>
-            <Text style={styles.label}>{label}</Text>
+            {/* REMOVIDO: A tag <Text style={styles.label}>{label}</Text> foi removida para evitar a duplicação do rótulo. */}
             
             <TouchableOpacity 
                 style={styles.inputContainer} 
-                onPress={() => setShowPicker(true)}
+                onPress={handleOpenPicker}
                 activeOpacity={0.7}
             >
-                <Text style={styles.inputText}>
+                <Text style={value ? styles.inputText : styles.placeholderText}>
                     {displayValue}
                 </Text>
-                <MaterialIcons name="calendar-today" size={20} color="#00315c" />
+                
+                {/* Ícone de calendário ou de limpar, se for nullable e tiver valor */}
+                {nullable && value ? (
+                    <TouchableOpacity onPress={handleClearDate} style={styles.clearIcon}>
+                        <MaterialIcons name="clear" size={20} color="#e74c3c" />
+                    </TouchableOpacity>
+                ) : (
+                    <MaterialIcons name="calendar-today" size={20} color="#00315c" />
+                )}
             </TouchableOpacity>
 
             {/* Renderiza o DateTimePicker se showPicker for true */}
             {showPicker && (
                 <DateTimePicker
                     testID="dateTimePicker"
-                    value={value || new Date()} // Usa o valor atual ou a data de hoje
-                    mode="date" // Modo 'date' para seleção de data
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'} // Estilo de exibição
+                    // AGORA PASSANDO O OBJETO DATE CORRETO
+                    value={dateObject} 
+                    mode="date" 
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                     onChange={handleDateChange}
                 />
             )}
@@ -81,14 +109,16 @@ export default function DatePicker({ value, onChange, label = 'Data' }) {
 
 const styles = StyleSheet.create({
     container: {
-        marginBottom: 15,
+        // Reduzido para 10 para ocupar menos espaço, já que o label foi removido
+        marginBottom: 10, 
         width: '100%',
     },
-    label: {
-        fontSize: 14,
-        color: '#00315c',
-        marginBottom: 5,
-        fontWeight: 'bold',
+    // O estilo label foi mantido, mas não é usado
+    label: { 
+        fontSize: 14, 
+        color: '#333', 
+        marginBottom: 5, 
+        fontWeight: '600',
     },
     inputContainer: {
         flexDirection: 'row',
@@ -100,11 +130,7 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
         borderWidth: 1,
         borderColor: '#ccc',
-        minHeight: 48,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 2,
+        minHeight: 50,
         elevation: 1,
     },
     inputText: {
@@ -112,4 +138,12 @@ const styles = StyleSheet.create({
         color: '#333',
         flex: 1,
     },
+    placeholderText: {
+        fontSize: 16,
+        color: '#9e9e9e',
+        flex: 1,
+    },
+    clearIcon: {
+        paddingLeft: 10,
+    }
 });

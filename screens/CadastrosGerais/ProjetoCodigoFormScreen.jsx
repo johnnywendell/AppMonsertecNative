@@ -1,21 +1,26 @@
 import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { salvarAprovadorLocal, buscarAprovador } from '../../services/aprovadorService';
+// Importa o serviço correto
+import { salvarProjetoCodigoLocal, buscarProjetoCodigo } from '../../services/projetoCodigoService'; 
 import MessageModal from '../../components/MessageModal';
 import CustomPickerModal from '../../components/CustomPickerModal'; 
 
-// Opções estáticas de exemplo para o Contrato. (MANTER ESTRUTURA PARA TESTES)
+// Opções estáticas de exemplo para o Contrato.
+// **IMPORTANTE**: Na aplicação real, estas opções devem ser carregadas de uma tabela local de Contratos (offline-first).
 const CONTRATO_OPTIONS = [
     { label: 'Contrato Braskem', value: 1 },
+    { label: 'Contrato Petrobrás', value: 2 },
+    { label: 'Contrato Vale', value: 3 },
 ];
 
-export default function AprovadorFormScreen({ route }) {
+export default function ProjetoCodigoFormScreen({ route }) {
     const navigation = useNavigation();
-    const id = route.params?.id || null; // ID local do Aprovador (ou null para novo)
+    const id = route.params?.id || null; // ID local do ProjetoCodigo (ou null para novo)
     const isEditing = id !== null;
 
-    const [aprovador, setAprovador] = useState('');
+    // Mudança: area -> projeto_nome
+    const [projetoNome, setProjetoNome] = useState(''); 
     const [contratoId, setContratoId] = useState(CONTRATO_OPTIONS[0].value);
     const [loading, setLoading] = useState(isEditing);
 
@@ -28,37 +33,39 @@ export default function AprovadorFormScreen({ route }) {
     // Define o título da tela
     useLayoutEffect(() => {
         navigation.setOptions({
-            title: isEditing ? 'Editar Aprovador' : 'Novo Aprovador',
+            title: isEditing ? 'Editar Código de Projeto' : 'Novo Código de Projeto',
         });
     }, [navigation, isEditing]);
 
     // Carregar dados para edição
     useEffect(() => {
         if (isEditing) {
-            const loadAprovador = async () => {
+            const loadProjetoCodigo = async () => {
                 try {
-                    const aprovadorData = await buscarAprovador(id);
-                    if (aprovadorData) {
-                        setAprovador(aprovadorData.aprovador);
-                        setContratoId(aprovadorData.contrato_server_id || CONTRATO_OPTIONS[0].value);
+                    // Mudança: buscarArea -> buscarProjetoCodigo
+                    const projetoData = await buscarProjetoCodigo(id);
+                    if (projetoData) {
+                        // Mudança: setArea(areaData.area) -> setProjetoNome(projetoData.projeto_nome)
+                        setProjetoNome(projetoData.projeto_nome);
+                        setContratoId(projetoData.contrato_server_id || CONTRATO_OPTIONS[0].value);
                     }
                 } catch (error) {
-                    console.error('Erro ao carregar Aprovador:', error);
-                    setModalMessage('Não foi possível carregar os dados do Aprovador.');
+                    console.error('Erro ao carregar Código de Projeto:', error);
+                    setModalMessage('Não foi possível carregar os dados do Código de Projeto.');
                     setModalVisible(true);
                 } finally {
                     setLoading(false);
                 }
             };
-            loadAprovador();
+            loadProjetoCodigo();
         } else {
             setLoading(false);
         }
     }, [id, isEditing]);
 
     const handleSave = async () => {
-        if (!aprovador || !contratoId) {
-            setModalMessage('Por favor, preencha o nome do Aprovador e selecione o Contrato.');
+        if (!projetoNome || !contratoId) {
+            setModalMessage('Por favor, preencha o Nome do Projeto e selecione o Contrato.');
             setModalVisible(true);
             return;
         }
@@ -67,21 +74,23 @@ export default function AprovadorFormScreen({ route }) {
 
         const dadosParaSalvar = {
             id: isEditing ? id : null, // ID local (SQLite)
-            aprovador,
+            projeto_nome: projetoNome, // Mudança: area -> projeto_nome
             contrato_server_id: contratoId,
         };
 
         try {
-            await salvarAprovadorLocal(dadosParaSalvar);
-            setModalMessage(`Aprovador ${isEditing ? 'atualizado' : 'criado'} e marcado para sincronização!`);
-            setNavigateOnClose(true); 
+            // Mudança: salvarAreaLocal -> salvarProjetoCodigoLocal
+            await salvarProjetoCodigoLocal(dadosParaSalvar); 
+            setModalMessage(`Código de Projeto ${isEditing ? 'atualizado' : 'criado'} e marcado para sincronização!`);
+            setNavigateOnClose(true); // Volta para a lista ao fechar o modal
             setModalVisible(true);
         } catch (error) {
-            console.error('Erro ao salvar Aprovador:', error);
+            console.error('Erro ao salvar Código de Projeto:', error);
+            // Adaptação da mensagem de erro
             if (error.message && error.message.includes('UNIQUE constraint failed')) {
-                setModalMessage('Erro: O nome do Aprovador já existe. Por favor, escolha outro nome.');
+                setModalMessage('Erro: O nome do Código de Projeto já existe. Por favor, escolha outro nome.');
             } else {
-                setModalMessage('Erro ao salvar Aprovador. Verifique os dados e tente novamente.');
+                setModalMessage('Erro ao salvar Código de Projeto. Verifique os dados e tente novamente.');
             }
             setModalVisible(true);
         } finally {
@@ -100,15 +109,15 @@ export default function AprovadorFormScreen({ route }) {
 
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-            <Text style={styles.title}>{isEditing ? `Editando Aprovador: ${aprovador}` : 'Novo Aprovador'}</Text>
+            <Text style={styles.title}>{isEditing ? `Editando Código: ${projetoNome}` : 'Novo Código de Projeto'}</Text>
             
-            {/* Campo Nome do Aprovador */}
-            <Text style={styles.label}>Nome do Aprovador *</Text>
+            {/* Campo Nome do Projeto */}
+            <Text style={styles.label}>Nome do Projeto *</Text>
             <TextInput 
                 style={styles.input} 
-                value={aprovador} 
-                onChangeText={setAprovador} 
-                placeholder="Nome do Aprovador"
+                value={projetoNome} 
+                onChangeText={setProjetoNome} 
+                placeholder="Nome do Projeto (Ex: CIP-BRK-0001 Caldeiraria)"
                 autoCapitalize="words" 
             />
 
@@ -122,7 +131,7 @@ export default function AprovadorFormScreen({ route }) {
 
             <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={loading}>
                 <Text style={styles.saveButtonText}>
-                    {loading ? 'Salvando...' : (isEditing ? 'Atualizar Aprovador' : 'Salvar Aprovador')}
+                    {loading ? 'Salvando...' : (isEditing ? 'Atualizar Código' : 'Salvar Código')}
                 </Text>
             </TouchableOpacity>
 
@@ -149,7 +158,6 @@ export default function AprovadorFormScreen({ route }) {
     );
 }
 
-// Estilos mantidos, pois são genéricos para formulários
 const styles = StyleSheet.create({
     container: { flex: 1, padding: 16, backgroundColor: '#f5f7fa' },
     scrollContent: { paddingBottom: 40 },
