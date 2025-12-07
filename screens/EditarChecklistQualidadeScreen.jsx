@@ -79,10 +79,10 @@ const getImageUrl = (url) => {
 
     const actualUri = typeof url === 'object' ? url.uri : url;
 
-    const isAbsolute = /^http?:\/\//i.test(actualUri);
+    const isAbsolute = /^https?:\/\//i.test(actualUri);
     // Hosts que devem ser tratados como caminho relativo, mesmo sendo absolutos
-    const sameHost = isAbsolute && actualUri.includes('192.168.0.5:8000');
-    const isDevHost = isAbsolute && actualUri.includes('192.168.0.5:8000'); // <--- 🚨 ADICIONAR CONDIÇÃO DO IP LOCAL
+    const sameHost = isAbsolute && actualUri.includes('hml.scaip.app.br');
+    const isDevHost = isAbsolute && actualUri.includes('hml.scaip.app.br'); // <--- 🚨 ADICIONAR CONDIÇÃO DO IP LOCAL
 
     // 1) Se for URL absoluta E não for nenhum dos hosts conhecidos → retorna direto
     if (isAbsolute && !sameHost && !isDevHost) {
@@ -95,7 +95,7 @@ const getImageUrl = (url) => {
     // Se for URL absoluta (de um host conhecido, incluindo o dev host),
     // removemos o HOST para obter apenas o PATH (ex: /media/imagens/...)
     if (isAbsolute) { 
-        relativePath = actualUri.replace(/^http?:\/\/[^/]+/i, '');
+        relativePath = actualUri.replace(/^https?:\/\/[^/]+/i, '');
     } else {
         // Caso contrário, trata como caminho relativo (o padrão esperado do Django)
         relativePath = actualUri.startsWith('/')
