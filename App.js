@@ -9,7 +9,13 @@ import Onboarding from './screens/Onboarding';
 import LoginScreen from './screens/LoginScreen';
 import DrawerRoutes from './routes/DrawerRoutes';
 import { setupAxiosInterceptors } from './services/authService';
+import { LogBox } from 'react-native';
 
+// Ignorar mensagens específicas
+LogBox.ignoreLogs([
+  'Text strings must be rendered within a <Text> component'
+]);
+//LogBox.ignoreAllLogs(true); // Ignorar TODOS os warnings
 const Stack = createStackNavigator();
 
 export default function App() {
@@ -32,8 +38,8 @@ export default function App() {
                 
                 // >>> CHAMADA TEMPORÁRIA PARA RESETAR O BANCO <<<
                 // REMOVA OU COMENTE ESTA LINHA APÓS O AJUSTE NA TABELA COLABORADORES
-                console.warn('!!! AVISO: BANCO DE DADOS SERÁ RESETADO (PERDA TOTAL DE DADOS) !!!');
-                await resetDatabase();
+                //console.warn('!!! AVISO: BANCO DE DADOS SERÁ RESETADO (PERDA TOTAL DE DADOS) !!!');
+                //await resetDatabase();
                 // >>> FIM DA CHAMADA TEMPORÁRIA <<<
                 
                 await setupDatabase();

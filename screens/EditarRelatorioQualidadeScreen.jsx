@@ -24,10 +24,10 @@ import { atualizarRelatorio, buscarRelatorioPorId, listarAreas, fetchColaborador
 import NetInfo from '@react-native-community/netinfo';
 import { File } from 'expo-file-system'; // Updated import for modern APIimport { getStoredTokens } from '../services/authService';
 import { Image } from 'expo-image';
-
-
+import { getStoredTokens } from '../services/authService';
+import { api, BASE_URL } from '../services/api';
 const PRIMARY = '#16356C';
-const BASE_URL = 'https://hml.scaip.app.br'; // Ensure this is correct
+
 
 const ETAPA_BACKGROUNDS = [
   '#F5F8FC', // azul bem clarinho
@@ -37,41 +37,47 @@ const ETAPA_BACKGROUNDS = [
 
 // getImageUrl function to handle image URLs with authentication
 const getImageUrl = (url) => {
-  if (!url) return null;
+    if (!url) return null;
 
-  const actualUri = typeof url === 'object' ? url.uri : url;
+    const actualUri = typeof url === 'object' ? url.uri : url;
 
-  // 1) Se já for uma URL absoluta e não for do mesmo host → retorna direto
-  const isAbsolute = /^https?:\/\//i.test(actualUri);
-  const sameHost = isAbsolute && actualUri.includes('hml.scaip.app.br');
+    const isAbsolute = /^http?:\/\//i.test(actualUri);
+    // Hosts que devem ser tratados como caminho relativo, mesmo sendo absolutos
+    const sameHost = isAbsolute && actualUri.includes('192.168.0.5:8000');
+    const isDevHost = isAbsolute && actualUri.includes('192.168.0.5:8000'); // <--- 🚨 ADICIONAR CONDIÇÃO DO IP LOCAL
 
-  if (isAbsolute && !sameHost) {
-    return actualUri;
-  }
-
-  // 2) Normaliza para path relativo
-  let relativePath;
-  if (isAbsolute && sameHost) {
-    relativePath = actualUri.replace(/^https?:\/\/[^/]+/i, '');
-  } else {
-    relativePath = actualUri.startsWith('/')
-      ? actualUri
-      : `/${actualUri.replace(/^\/+/, '')}`;
-  }
-
-  // 3) Garante que o caminho comece com "/geral/api/"
-  if (!relativePath.startsWith('/geral/api/')) {
-    if (relativePath.startsWith('/media/')) {
-      relativePath = `/geral/api${relativePath}`;
-    } else {
-      relativePath = `/geral/api/media/${relativePath.replace(/^\/+/, '')}`;
+    // 1) Se for URL absoluta E não for nenhum dos hosts conhecidos → retorna direto
+    if (isAbsolute && !sameHost && !isDevHost) {
+        return actualUri;
     }
-  }
 
-  // 4) Constrói a URL final
-  const host = BASE_URL.replace(/\/+$/, '');
-  console.log('Final image URL:', `${host}${relativePath}`);
-  return `${host}${relativePath}`;
+    // 2) Normaliza para path relativo
+    let relativePath;
+    
+    // Se for URL absoluta (de um host conhecido, incluindo o dev host),
+    // removemos o HOST para obter apenas o PATH (ex: /media/imagens/...)
+    if (isAbsolute) { 
+        relativePath = actualUri.replace(/^http?:\/\/[^/]+/i, '');
+    } else {
+        // Caso contrário, trata como caminho relativo (o padrão esperado do Django)
+        relativePath = actualUri.startsWith('/')
+            ? actualUri
+            : `/${actualUri.replace(/^\/+/, '')}`;
+    }
+
+    // 3) Garante que o caminho comece com "/geral/api/"
+    if (!relativePath.startsWith('/geral/api/')) {
+        if (relativePath.startsWith('/media/')) {
+            relativePath = `/geral/api${relativePath}`; // /geral/api + /media/...
+        } else {
+            relativePath = `/geral/api/media/${relativePath.replace(/^\/+/, '')}`;
+        }
+    }
+
+    // 4) Constrói a URL final
+    const host = BASE_URL.replace(/\/+$/, '');
+    console.log('Final image URL (protected):', `${host}${relativePath}`);
+    return `${host}${relativePath}`;
 };
 
 function Section({ title, collapsed, onToggle, children }) {
@@ -1280,13 +1286,14 @@ export default function EditarRelatorioQualidadeScreen() {
                             foto.photo?.startsWith('file://') || foto.photo?.startsWith('content://')
                               ? { uri: foto.photo } // foto local → não usa headers
                               : {
-                                uri: getImageUrl(foto.photo),
-                                headers: { Authorization: `Bearer ${accessToken}` }, // foto remota → usa token
+                                  uri: getImageUrl(foto.photo),
+                                  headers: { Authorization: `Bearer ${accessToken}` }, // foto remota → usa token
+                                  
                               }
                           }
                           style={styles.thumb}
                           onError={(e) =>
-                            console.error('Erro ao carregar imagem:', e.nativeEvent.error, foto.photo)
+                            console.error('Erro ao carregar imagem:', e.nativeEvent.error, getImageUrl(foto.photo))
                           }
                         />
                       </TouchableOpacity>

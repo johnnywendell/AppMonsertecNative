@@ -25,9 +25,9 @@ import * as ImagePicker from 'expo-image-picker';
 import { File } from 'expo-file-system'; // Updated import for modern APIimport { getStoredTokens } from '../services/authService';
 import { getStoredTokens } from '../services/authService';
 import { Image } from 'expo-image';
-
+import { api, BASE_URL } from '../services/api';
 const PRIMARY = '#16356C';
-const BASE_URL = 'https://hml.scaip.app.br'; // Ensure this is correct
+
 
 // Cores de fundo para as etapas
 const ETAPA_BACKGROUNDS = [
@@ -79,19 +79,25 @@ const getImageUrl = (url) => {
 
     const actualUri = typeof url === 'object' ? url.uri : url;
 
-    // 1) Se já for uma URL absoluta e não for do mesmo host → retorna direto
-    const isAbsolute = /^https?:\/\//i.test(actualUri);
-    const sameHost = isAbsolute && actualUri.includes('hml.scaip.app.br');
+    const isAbsolute = /^http?:\/\//i.test(actualUri);
+    // Hosts que devem ser tratados como caminho relativo, mesmo sendo absolutos
+    const sameHost = isAbsolute && actualUri.includes('192.168.0.5:8000');
+    const isDevHost = isAbsolute && actualUri.includes('192.168.0.5:8000'); // <--- 🚨 ADICIONAR CONDIÇÃO DO IP LOCAL
 
-    if (isAbsolute && !sameHost) {
+    // 1) Se for URL absoluta E não for nenhum dos hosts conhecidos → retorna direto
+    if (isAbsolute && !sameHost && !isDevHost) {
         return actualUri;
     }
 
     // 2) Normaliza para path relativo
     let relativePath;
-    if (isAbsolute && sameHost) {
-        relativePath = actualUri.replace(/^https?:\/\/[^/]+/i, '');
+    
+    // Se for URL absoluta (de um host conhecido, incluindo o dev host),
+    // removemos o HOST para obter apenas o PATH (ex: /media/imagens/...)
+    if (isAbsolute) { 
+        relativePath = actualUri.replace(/^http?:\/\/[^/]+/i, '');
     } else {
+        // Caso contrário, trata como caminho relativo (o padrão esperado do Django)
         relativePath = actualUri.startsWith('/')
             ? actualUri
             : `/${actualUri.replace(/^\/+/, '')}`;
@@ -100,7 +106,7 @@ const getImageUrl = (url) => {
     // 3) Garante que o caminho comece com "/geral/api/"
     if (!relativePath.startsWith('/geral/api/')) {
         if (relativePath.startsWith('/media/')) {
-            relativePath = `/geral/api${relativePath}`;
+            relativePath = `/geral/api${relativePath}`; // /geral/api + /media/...
         } else {
             relativePath = `/geral/api/media/${relativePath.replace(/^\/+/, '')}`;
         }
@@ -108,7 +114,7 @@ const getImageUrl = (url) => {
 
     // 4) Constrói a URL final
     const host = BASE_URL.replace(/\/+$/, '');
-    console.log('Final image URL:', `${host}${relativePath}`);
+    console.log('Final image URL (protected):', `${host}${relativePath}`);
     return `${host}${relativePath}`;
 };
 
@@ -1231,6 +1237,7 @@ export default function EditarChecklistQualidadeScreen() {
                                         <Text style={styles.emptyText}>Nenhuma foto adicionada.</Text>
                                     ) : (
                                         (checklist.checklistcarimbo || []).map((item, idx) => (
+                                            
                                             <TouchableOpacity
                                                 key={idx}
                                                 onLongPress={() => removerFoto(idx)}
@@ -1239,16 +1246,19 @@ export default function EditarChecklistQualidadeScreen() {
                                             >
                                                 <Image
                                                     source={
+                                                        
                                                         item.photo?.startsWith('file://') || item.photo?.startsWith('content://')
                                                             ? { uri: item.photo } // foto local → não usa headers
                                                             : {
                                                                 uri: getImageUrl(item.photo),
                                                                 headers: { Authorization: `Bearer ${accessToken}` }, // foto remota → usa token
+                                                                
                                                             }
+                                                            
                                                     }
                                                     style={styles.thumb}
                                                     onError={(e) =>
-                                                        console.error('Erro ao carregar imagem (carimbo):', e.nativeEvent.error, item.photo)
+                                                        console.error('Erro ao carregar imagem (carimbo):', e.nativeEvent.error, getImageUrl(item.photo))
                                                     }
                                                 />
                                             </TouchableOpacity>

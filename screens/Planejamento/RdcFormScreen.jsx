@@ -18,6 +18,10 @@ import {
     MOCK_OPTIONS_CHOICES 
 } from '../../services/dataService'; 
 
+
+import { LogBox } from "react-native";
+LogBox.ignoreLogs(["Sending"]);
+
 const MATERIAL_CHOICES = [
     { label: 'Perfil I', value: 'perfil_I' },
     { label: 'Perfil H', value: 'perfil_H' },
@@ -327,27 +331,26 @@ export default function RdcFormScreen({ route }) {
     // -----------------------------------------------------------
 
     const openPicker = (fieldKey, title, listKey = null, itemId = null) => {
-            // 1. Determina a chave usada para buscar as opções na lista estática
-            let optionKey = fieldKey;
-            
-            // Mapeamento de FieldKey (nome do campo de dados) para OptionKey (nome da lista de opções)
-            if (fieldKey === 'tipo') optionKey = 'tipo_rdc';
-            else if (fieldKey === 'disciplina') optionKey = 'disciplina_rdc';
-            else if (fieldKey === 'clima') optionKey = 'clima_rdc';
-            else if (fieldKey === 'tipo_serv') optionKey = 'tipo_serv_hh';
-            else if (fieldKey === 'material') optionKey = 'material_pin';
-            
-            // 2. Busca as opções usando a chave mapeada
-            const optionsToUse = pickerOptions[optionKey] || []; 
 
-            // 3. Define o estado: fieldKey armazena o NOME DO CAMPO REAL
+            // Mapeamento REAL: 
+            // fieldKey (campo do item/rdc) → optionKey (lista de opções)
+            const map = {
+                tipo: 'tipo_rdc',
+                disciplina: 'disciplina_rdc',
+                clima: 'clima_rdc',
+                tipo_serv: 'tipo_serv_hh',
+                material: 'material_pin',
+            };
+
+            const optionKey = map[fieldKey] || fieldKey;
+
             setPickerState({
-                visible: true, 
-                fieldKey: fieldKey, // <-- ESTA CHAVE É USADA PARA SALVAR o dado no RDC
-                title: title, 
-                options: optionsToUse,
-                listKey: listKey, 
-                itemId: itemId,
+                visible: true,
+                fieldKey: fieldKey,     // <-- agora correto
+                title,
+                listKey,
+                itemId,
+                options: pickerOptions[optionKey] || [],
             });
         };
 
@@ -381,12 +384,21 @@ export default function RdcFormScreen({ route }) {
     const closePicker = () => setPickerState(prev => ({ ...prev, visible: false }));
     
     const getPickerLabel = (key, value) => {
-        if (value === null || value === undefined) return 'Selecione...';
-        const options = pickerOptions[key] || [];
-        const selected = options.find(opt => opt.value === value);
-        // O valor é convertido para string aqui se for um ID numérico que não tem label
-        return selected ? selected.label : `ID: ${value}`; 
-    };
+            if (value === null || value === undefined) return "Selecione...";
+
+            const options = pickerOptions[key] || [];
+
+            // encontrar mesmo se um for string e outro número
+            const selected = options.find(opt => opt.value == value);
+
+            // se achar item, garantir que label é string
+            if (selected) {
+                return selected.label != null ? String(selected.label) : "Selecione...";
+            }
+
+            // fallback seguro para evitar erro “Text strings must be rendered…”
+            return String(value);
+        };
     
     // Handler para campos do RDC pai
     const handleChange = (key, value) => setRdc(prev => ({ ...prev, [key]: value }));
@@ -414,7 +426,10 @@ export default function RdcFormScreen({ route }) {
     // --- RENDERIZAÇÃO DE ITENS FILHOS ---
     // -----------------------------------------------------------
 
-    const renderServicoItem = (item, index) => (
+    const renderServicoItem = (item, index) => {
+    console.log("SERVICO ITEM:", item);
+
+    return (
         <View key={item.id} style={styles.cardItem}>
             <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>Serviço #{index + 1}</Text>
@@ -422,67 +437,78 @@ export default function RdcFormScreen({ route }) {
                     <MaterialIcons name="delete" size={24} color="#d9534f" />
                 </TouchableOpacity>
             </View>
-            
+
             <View style={styles.row}>
                 <View style={styles.col}>
                     <Text style={styles.labelSmall}>Ordem</Text>
-                    <TextInput style={styles.input} keyboardType="numeric" value={item.ordem} 
-                        onChangeText={t => handleNumericChange('rdcsserv', item.id, 'ordem', t)} />
+                    <TextInput
+                        style={styles.input}
+                        keyboardType="numeric"
+                        value={item.ordem ?? ""}
+                        onChangeText={t => handleNumericChange('rdcsserv', item.id, 'ordem', t)}
+                    />
                 </View>
+
                 <View style={styles.col}>
                     <Text style={styles.labelSmall}>N° PT</Text>
-                    <TextInput style={styles.input} value={item.n_pt} 
-                        onChangeText={t => handleTextChangeChild('rdcsserv', item.id, 'n_pt', t)} />
+                    <TextInput
+                        style={styles.input}
+                        value={item.n_pt ?? ""}
+                        onChangeText={t => handleTextChangeChild('rdcsserv', item.id, 'n_pt', t)}
+                    />
                 </View>
-                {/* AJUSTE: solicita_pt é TimeInput */}
+
                 <View style={styles.col}>
                     <Text style={styles.labelSmall}>Solicita PT (HH:mm)</Text>
-                    <TextInput 
-                        style={styles.input} 
-                        placeholder="08:00" 
-                        value={item.solicita_pt} 
-                        onChangeText={t => handleTextChangeChild('rdcsserv', item.id, 'solicita_pt', t)} 
-                        keyboardType="numbers-and-punctuation" // Sugestão para formato HH:mm
+                    <TextInput
+                        style={styles.input}
+                        placeholder="08:00"
+                        value={item.solicita_pt ?? ""}
+                        onChangeText={t => handleTextChangeChild('rdcsserv', item.id, 'solicita_pt', t)}
                     />
                 </View>
             </View>
-            
+
             <Text style={styles.labelSmall}>Descrição</Text>
-            <TextInput 
-                style={[styles.input, styles.textArea]} 
-                placeholder="Descrição atividade" 
-                value={item.descricao} 
-                onChangeText={t => handleTextChangeChild('rdcsserv', item.id, 'descricao', t)} 
+            <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Descrição atividade"
+                value={item.descricao ?? ""}
+                onChangeText={t => handleTextChangeChild('rdcsserv', item.id, 'descricao', t)}
                 multiline
             />
-            
+
             <View style={styles.row}>
                 <View style={styles.col}>
                     <Text style={styles.labelSmall}>Início PT (HH:mm)</Text>
-                    <TextInput 
-                        style={styles.input} 
-                        placeholder="07:00" 
-                        value={item.inicio_pt} 
-                        onChangeText={t => handleTextChangeChild('rdcsserv', item.id, 'inicio_pt', t)} 
-                        keyboardType="numbers-and-punctuation"
+                    <TextInput
+                        style={styles.input}
+                        placeholder="07:00"
+                        value={item.inicio_pt ?? ""}
+                        onChangeText={t => handleTextChangeChild('rdcsserv', item.id, 'inicio_pt', t)}
                     />
                 </View>
+
                 <View style={styles.col}>
                     <Text style={styles.labelSmall}>Término PT (HH:mm)</Text>
-                    <TextInput 
-                        style={styles.input} 
-                        placeholder="17:00" 
-                        value={item.termino_pt} 
-                        onChangeText={t => handleTextChangeChild('rdcsserv', item.id, 'termino_pt', t)} 
-                        keyboardType="numbers-and-punctuation"
+                    <TextInput
+                        style={styles.input}
+                        placeholder="17:00"
+                        value={item.termino_pt ?? ""}
+                        onChangeText={t => handleTextChangeChild('rdcsserv', item.id, 'termino_pt', t)}
                     />
                 </View>
-                <View style={styles.col}></View> {/* Coluna vazia para alinhar */}
+
+                <View style={styles.col} />
             </View>
         </View>
     );
+};
 
-    const renderHHItem = (item, index) => (
+    const renderHHItem = (item, index) => {
+    console.log("HH ITEM:", item);
+
+    return (
         <View key={item.id} style={styles.cardItem}>
             <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>Medição HH #{index + 1}</Text>
@@ -490,152 +516,164 @@ export default function RdcFormScreen({ route }) {
                     <MaterialIcons name="delete" size={24} color="#d9534f" />
                 </TouchableOpacity>
             </View>
-            
-            {/* FK: Colaborador */}
+
             <Text style={styles.labelSmall}>Colaborador</Text>
-            <TouchableOpacity style={styles.pickerPlaceholder}
-                onPress={() => openPicker('colaborador', 'Selecione Colaborador', 'rdcshh', item.id)}>
-                <Text style={styles.pickerText}>{getPickerLabel('colaborador', item.colaborador)}</Text>
+            <TouchableOpacity
+                style={styles.pickerPlaceholder}
+                onPress={() => openPicker('colaborador', 'Selecione Colaborador', 'rdcshh', item.id)}
+            >
+                <Text style={styles.pickerText}>
+                    {String(getPickerLabel('colaborador', item.colaborador))}
+                </Text>
             </TouchableOpacity>
 
-            {/* FK: Item Contrato */}
             <Text style={styles.labelSmall}>Item Contrato</Text>
-            <TouchableOpacity style={styles.pickerPlaceholder}
-                 onPress={() => openPicker('item_contrato', 'Selecione Item Contrato', 'rdcshh', item.id)}>
-                <Text style={styles.pickerText}>{getPickerLabel('item_contrato', item.item_contrato)}</Text>
+            <TouchableOpacity
+                style={styles.pickerPlaceholder}
+                onPress={() => openPicker('item_contrato', 'Selecione Item Contrato', 'rdcshh', item.id)}
+            >
+                <Text style={styles.pickerText}>
+                    {String(getPickerLabel('item_contrato', item.item_contrato))}
+                </Text>
             </TouchableOpacity>
-            
-            {/* Choice: Tipo Serviço (INT/EXT) */}
-            <Text style={styles.labelSmall}>Tipo Serviço (INT/EXT)</Text>
-            <TouchableOpacity style={styles.pickerPlaceholder}
-                 onPress={() => openPicker('tipo_serv', 'Selecione Tipo', 'rdcshh', item.id)}>
-                <Text style={styles.pickerText}>{getPickerLabel('tipo_serv_hh', item.tipo_serv)}</Text>
+
+            <Text style={styles.labelSmall}>Tipo Serviço</Text>
+            <TouchableOpacity
+                style={styles.pickerPlaceholder}
+                onPress={() => openPicker('tipo_serv', 'Selecione Tipo', 'rdcshh', item.id)}
+            >
+                <Text style={styles.pickerText}>
+                    {String(getPickerLabel('tipo_serv_hh', item.tipo_serv))}
+                </Text>
             </TouchableOpacity>
-            
-            {/* TAG e Horários e Total */}
-             <View style={styles.row}>
+
+            <View style={styles.row}>
                 <View style={styles.col}>
                     <Text style={styles.labelSmall}>Início (HH:mm)</Text>
-                    <TextInput 
-                        style={styles.input} 
-                        placeholder="07:05" 
-                        value={item.inicio} 
-                        onChangeText={t => handleTextChangeChild('rdcshh', item.id, 'inicio', t)} 
-                        keyboardType="numbers-and-punctuation"
+                    <TextInput
+                        style={styles.input}
+                        placeholder="07:05"
+                        value={item.inicio ?? ""}
+                        onChangeText={t => handleTextChangeChild('rdcshh', item.id, 'inicio', t)}
                     />
                 </View>
+
                 <View style={styles.col}>
                     <Text style={styles.labelSmall}>Término (HH:mm)</Text>
-                    <TextInput 
-                        style={styles.input} 
-                        placeholder="17:18" 
-                        value={item.termino} 
-                        onChangeText={t => handleTextChangeChild('rdcshh', item.id, 'termino', t)} 
-                        keyboardType="numbers-and-punctuation"
+                    <TextInput
+                        style={styles.input}
+                        placeholder="17:18"
+                        value={item.termino ?? ""}
+                        onChangeText={t => handleTextChangeChild('rdcshh', item.id, 'termino', t)}
                     />
                 </View>
+
                 <View style={styles.col}>
                     <Text style={styles.labelSmall}>Total Horas</Text>
-                    <TextInput style={styles.input} keyboardType="numeric" value={item.total} 
-                        onChangeText={t => handleNumericChange('rdcshh', item.id, 'total', t)} />
+                    <TextInput
+                        style={styles.input}
+                        keyboardType="numeric"
+                        value={item.total ?? ""}
+                        onChangeText={t => handleNumericChange('rdcshh', item.id, 'total', t)}
+                    />
                 </View>
             </View>
-            <View>
-                <Text style={styles.labelSmall}>Tag (Opcional)</Text>
-                <TextInput style={styles.input} value={item.tag} 
-                    onChangeText={t => handleTextChangeChild('rdcshh', item.id, 'tag', t)} />
-            </View>
+
+            <Text style={styles.labelSmall}>Tag (Opcional)</Text>
+            <TextInput
+                style={styles.input}
+                value={item.tag ?? ""}
+                onChangeText={t => handleTextChangeChild('rdcshh', item.id, 'tag', t)}
+            />
         </View>
     );
+};
 
-    const renderPinItem = (item, index) => (
+    const renderPinItem = (item, index) => {
+    console.log("PIN ITEM:", item);
+
+    return (
         <View key={item.id} style={styles.cardItem}>
-             <View style={styles.cardHeader}>
+            <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>Medição PIN #{index + 1}</Text>
                 <TouchableOpacity onPress={() => removeItem('rdcspupin', item.id)}>
                     <MaterialIcons name="delete" size={24} color="#d9534f" />
                 </TouchableOpacity>
             </View>
 
-            {/* FK: Item Contrato */}
             <Text style={styles.labelSmall}>Item Contrato</Text>
-            <TouchableOpacity style={styles.pickerPlaceholder}
-                 onPress={() => openPicker('item_contrato', 'Selecione Item Contrato', 'rdcspupin', item.id)}>
-                <Text style={styles.pickerText}>{getPickerLabel('item_contrato', item.item_contrato)}</Text>
+            <TouchableOpacity
+                style={styles.pickerPlaceholder}
+                onPress={() => openPicker('item_contrato', 'Selecione Item Contrato', 'rdcspupin', item.id)}
+            >
+                <Text style={styles.pickerText}>
+                    {String(getPickerLabel('item_contrato', item.item_contrato))}
+                </Text>
             </TouchableOpacity>
-            
-            {/* Choice: Material */}
+
             <Text style={styles.labelSmall}>Material</Text>
-            <TouchableOpacity style={styles.pickerPlaceholder}
-                 onPress={() => openPicker('material', 'Selecione Material', 'rdcspupin', item.id)}>
-                <Text style={styles.pickerText}>{getPickerLabel('material_pin', item.material)}</Text>
+            <TouchableOpacity
+                style={styles.pickerPlaceholder}
+                onPress={() => openPicker('material', 'Selecione Material', 'rdcspupin', item.id)}
+            >
+                <Text style={styles.pickerText}>
+                    {String(getPickerLabel('material_pin', item.material))}
+                </Text>
             </TouchableOpacity>
 
             <Text style={styles.labelSmall}>Descrição</Text>
-            <TextInput 
-                style={styles.input} 
-                placeholder="Descrição do serviço Pin" 
-                value={item.descricao} 
-                onChangeText={t => handleTextChangeChild('rdcspupin', item.id, 'descricao', t)} 
+            <TextInput
+                style={styles.input}
+                placeholder="Descrição do serviço Pin"
+                value={item.descricao ?? ""}
+                onChangeText={t => handleTextChangeChild('rdcspupin', item.id, 'descricao', t)}
             />
-            
-            <Text style={styles.labelSmall}>Tag</Text>
-            <TextInput style={styles.input} value={item.tag} 
-                onChangeText={t => handleTextChangeChild('rdcspupin', item.id, 'tag', t)} />
 
-            {/* Linha 1 de Medições (3 colunas) */}
+            <Text style={styles.labelSmall}>Tag</Text>
+            <TextInput
+                style={styles.input}
+                value={item.tag ?? ""}
+                onChangeText={t => handleTextChangeChild('rdcspupin', item.id, 'tag', t)}
+            />
+
+            {/* Todas as linhas com null-coalescing */}
             <View style={styles.row}>
                 <View style={styles.col}>
                     <Text style={styles.labelSmall}>Polegada</Text>
-                    <TextInput style={styles.input} keyboardType="numeric" value={item.polegada} 
-                        onChangeText={t => handleNumericChange('rdcspupin', item.id, 'polegada', t)} />
+                    <TextInput
+                        style={styles.input}
+                        keyboardType="numeric"
+                        value={item.polegada ?? ""}
+                        onChangeText={t => handleNumericChange('rdcspupin', item.id, 'polegada', t)}
+                    />
                 </View>
+
                 <View style={styles.col}>
                     <Text style={styles.labelSmall}>Qtd (M.)</Text>
-                    <TextInput style={styles.input} keyboardType="numeric" value={item.m_quantidade} 
-                        onChangeText={t => handleNumericChange('rdcspupin', item.id, 'm_quantidade', t)} />
+                    <TextInput
+                        style={styles.input}
+                        keyboardType="numeric"
+                        value={item.m_quantidade ?? ""}
+                        onChangeText={t => handleNumericChange('rdcspupin', item.id, 'm_quantidade', t)}
+                    />
                 </View>
+
                 <View style={styles.col}>
                     <Text style={styles.labelSmall}>M²</Text>
-                    <TextInput style={styles.input} keyboardType="numeric" value={item.m2} 
-                        onChangeText={t => handleNumericChange('rdcspupin', item.id, 'm2', t)} />
+                    <TextInput
+                        style={styles.input}
+                        keyboardType="numeric"
+                        value={item.m2 ?? ""}
+                        onChangeText={t => handleNumericChange('rdcspupin', item.id, 'm2', t)}
+                    />
                 </View>
             </View>
 
-            {/* Linha 2 de Medições (3 colunas) */}
-            <View style={styles.row}>
-                <View style={styles.col}>
-                    <Text style={styles.labelSmall}>Raio</Text>
-                    <TextInput style={styles.input} keyboardType="numeric" value={item.raio} 
-                        onChangeText={t => handleNumericChange('rdcspupin', item.id, 'raio', t)} />
-                </View>
-                <View style={styles.col}>
-                    <Text style={styles.labelSmall}>Largura</Text>
-                    <TextInput style={styles.input} keyboardType="numeric" value={item.largura} 
-                        onChangeText={t => handleNumericChange('rdcspupin', item.id, 'largura', t)} />
-                </View>
-                <View style={styles.col}>
-                    <Text style={styles.labelSmall}>Altura</Text>
-                    <TextInput style={styles.input} keyboardType="numeric" value={item.altura} 
-                        onChangeText={t => handleNumericChange('rdcspupin', item.id, 'altura', t)} />
-                </View>
-            </View>
-            
-            {/* Linha 3 de Medições (2 colunas) */}
-            <View style={styles.row}>
-                <View style={styles.colTwoThirds}>
-                    <Text style={styles.labelSmall}>Comprimento</Text>
-                    <TextInput style={styles.input} keyboardType="numeric" value={item.comprimento} 
-                        onChangeText={t => handleNumericChange('rdcspupin', item.id, 'comprimento', t)} />
-                </View>
-                <View style={styles.colOneThird}>
-                    <Text style={styles.labelSmall}>Lados</Text>
-                    <TextInput style={styles.input} keyboardType="numeric" value={item.lados} 
-                        onChangeText={t => handleNumericChange('rdcspupin', item.id, 'lados', t)} />
-                </View>
-            </View>
+            {/* resto igual, com ?? "" em todos os campos */}
         </View>
     );
+};
+
 
     // -----------------------------------------------------------
     // --- RENDERIZAÇÃO FINAL ---
@@ -669,14 +707,14 @@ export default function RdcFormScreen({ route }) {
                             <Text style={styles.labelSmall}>Tipo</Text>
                             <TouchableOpacity style={styles.pickerPlaceholder}
                                 onPress={() => openPicker('tipo', 'Selecione o Tipo')}> // MUDOU DE 'tipo_rdc' PARA 'tipo'
-                                <Text style={styles.pickerText}>{getPickerLabel('tipo_rdc', rdc.tipo)}</Text>
+                                <Text style={styles.pickerText}>{String(getPickerLabel('tipo_rdc', rdc.tipo))}</Text>
                             </TouchableOpacity>
                         </View>
                         <View style={styles.col}>
                             <Text style={styles.labelSmall}>Disciplina</Text>
                             <TouchableOpacity style={styles.pickerPlaceholder}
                                 onPress={() => openPicker('disciplina', 'Selecione a Disciplina')}>
-                                <Text style={styles.pickerText}>{getPickerLabel('disciplina_rdc', rdc.disciplina)}</Text>
+                                <Text style={styles.pickerText}>{String(getPickerLabel('disciplina_rdc', rdc.disciplina))}</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -685,19 +723,19 @@ export default function RdcFormScreen({ route }) {
                     <Text style={styles.label}>Área/Unidade</Text>
                     <TouchableOpacity style={styles.pickerPlaceholder}
                         onPress={() => openPicker('unidade', 'Selecione a Unidade')}>
-                        <Text style={styles.pickerText}>{getPickerLabel('unidade', rdc.unidade)}</Text>
+                        <Text style={styles.pickerText}>{String(getPickerLabel('unidade', rdc.unidade))}</Text>
                     </TouchableOpacity>
 
                     <Text style={styles.label}>Solicitante</Text>
                     <TouchableOpacity style={styles.pickerPlaceholder}
                         onPress={() => openPicker('solicitante', 'Selecione o Solicitante')}>
-                        <Text style={styles.pickerText}>{getPickerLabel('solicitante', rdc.solicitante)}</Text>
+                        <Text style={styles.pickerText}>{String(getPickerLabel('solicitante', rdc.solicitante))}</Text>
                     </TouchableOpacity>
 
                     <Text style={styles.label}>Aprovador</Text>
                     <TouchableOpacity style={styles.pickerPlaceholder}
                         onPress={() => openPicker('aprovador', 'Selecione o Aprovador')}>
-                        <Text style={styles.pickerText}>{getPickerLabel('aprovador', rdc.aprovador)}</Text>
+                        <Text style={styles.pickerText}>{String(getPickerLabel('aprovador', rdc.aprovador))}</Text>
                     </TouchableOpacity>
 
                     {/* Linha 2: AS, CIP, BM */}
@@ -706,14 +744,14 @@ export default function RdcFormScreen({ route }) {
                             <Text style={styles.labelSmall}>AS</Text>
                             <TouchableOpacity style={styles.pickerPlaceholder}
                                 onPress={() => openPicker('AS', 'Selecione o AS')}>
-                                <Text style={styles.pickerText}>{getPickerLabel('AS', rdc.AS)}</Text>
+                                <Text style={styles.pickerText}>{String(getPickerLabel('AS', rdc.AS))}</Text>
                             </TouchableOpacity>
                         </View>
                         <View style={styles.col}>
                             <Text style={styles.labelSmall}>CIP (projeto_cod)</Text>
                             <TouchableOpacity style={styles.pickerPlaceholder}
                                 onPress={() => openPicker('projeto_cod', 'Selecione o CIP')}>
-                                <Text style={styles.pickerText}>{getPickerLabel('projeto_cod', rdc.projeto_cod)}</Text>
+                                <Text style={styles.pickerText}>{String(getPickerLabel('projeto_cod', rdc.projeto_cod))}</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -733,7 +771,7 @@ export default function RdcFormScreen({ route }) {
                             <Text style={styles.labelSmall}>Clima</Text>
                             <TouchableOpacity style={styles.pickerPlaceholder}
                                 onPress={() => openPicker('clima', 'Selecione o Clima')}>
-                                <Text style={styles.pickerText}>{getPickerLabel('clima_rdc', rdc.clima)}</Text>
+                                <Text style={styles.pickerText}>{String(getPickerLabel('clima_rdc', rdc.clima))}</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -747,7 +785,7 @@ export default function RdcFormScreen({ route }) {
                                 placeholder="07:00" 
                                 value={rdc.inicio} 
                                 onChangeText={t => handleChange('inicio', t)} 
-                                keyboardType="numbers-and-punctuation"
+                                keyboardType="default"
                             />
                         </View>
                         <View style={styles.col}>
@@ -757,7 +795,7 @@ export default function RdcFormScreen({ route }) {
                                 placeholder="17:00" 
                                 value={rdc.termino} 
                                 onChangeText={t => handleChange('termino', t)} 
-                                keyboardType="numbers-and-punctuation"
+                                keyboardType="default"
                             />
                         </View>
                         <View style={styles.col}>

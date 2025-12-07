@@ -6,6 +6,7 @@ import MessageModal from '../components/MessageModal';
 import NetInfo from '@react-native-community/netinfo';
 import ColaboradorModal from '../components/ColaboradorModal';
 import { buscarUltimoApontamentoCompleto, buscarUltimoApontamentoDiaAnterior } from '../services/apontamentosService';
+import { formatLocalDateToISOString } from '../components/dateFormatter';
 
 export default function CriarApontamentoScreen() {
     const navigation = useNavigation();
@@ -123,10 +124,10 @@ export default function CriarApontamentoScreen() {
             setModalMessage('Por favor, preencha todos os campos obrigatórios.');
             setModalVisible(true);
             return;
-        }
+        }   
 
         const apontamento = {
-            data: data.toISOString().split('T')[0],
+            data: formatLocalDateToISOString(data),
             area: parseInt(area),
             projeto_cod: parseInt(projeto),
             disciplina,
