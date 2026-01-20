@@ -2,7 +2,23 @@
 
 import { runAsync, getAllAsync, getFirstAsync } from '../database';
 import { syncRDCs } from './syncService'; // Importar sua função de sync existente
+import { getDb } from '../database';
+import { api } from './api'; // Com chaves
 
+async function runBatchAsync(db, statements) {
+    // Esta é uma implementação simplificada; em um banco de dados Expo SQLite, 
+    // você usaria db.transactionAsync.
+    console.log(`⏳ Executando lote de ${statements.length} comandos SQL...`);
+    for (const stmt of statements) {
+        try {
+            await db.runAsync(stmt.sql, stmt.args);
+        } catch (e) {
+            console.error("❌ Erro ao executar statement em lote:", stmt.sql, stmt.args, e.message);
+            // Dependendo da sua necessidade, você pode lançar o erro para reverter a transação inteira
+        }
+    }
+    console.log("✅ Lote de comandos SQL concluído.");
+}
 /**
  * Insere ou atualiza um RDC localmente e marca para sincronização.
  * Lida com a conversão dos arrays de filhos (Serviços, HH, PIN) para JSON.
@@ -112,33 +128,83 @@ export const salvarRdcLocal = async (dados) => {
  * Listar RDCs (Offline-First)
  * Recupera do SQLite e converte os JSONs internos de volta para Arrays.
  */
-export const listarRDCs = async () => {
+const RDC_ENDPOINT = 'api/v1/planejamento/rdc/';
+export const buscarRDCsNaAPI = async (termo) => {
     try {
-        const listaRaw = await getAllAsync(
-            "SELECT * FROM rdc ORDER BY data DESC, id DESC"
-        );
+        // 1. Busca na API usando o filtro que configuramos no Django
+        const response = await api.get(`${RDC_ENDPOINT}?search=${termo}`);
+        const resultados = response.data.results;
 
-        // Processa os dados brutos para converter JSON string -> Objeto JS
-        const listaFormatada = listaRaw.map(rdc => ({
+        if (resultados.length > 0) {
+            const db = await getDb();
+            const statements = [];
+
+            // 2. Salva os resultados no SQLite para que o usuário possa vê-los
+            for (const rdc of resultados) {
+                statements.push({
+                    sql: `INSERT OR REPLACE INTO rdc (
+                        server_id, data, local, tipo, disciplina, obs, aprovado, 
+                        unidade_server_id, projeto_cod_server_id,
+                        servicos_json, hh_json, pin_json, sync_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`,
+                    args: [
+                        rdc.id, rdc.data, rdc.local, rdc.tipo, rdc.disciplina, rdc.obs, 
+                        rdc.aprovado ? 1 : 0, 
+                        rdc.unidade, rdc.projeto_cod, // Adicionado projeto_cod
+                        JSON.stringify(rdc.rdcsserv || []), 
+                        JSON.stringify(rdc.rdcshh || []), 
+                        JSON.stringify(rdc.rdcspupin || [])
+                    ]
+                });
+            }
+            await runBatchAsync(db, statements);
+        }
+        return resultados.length; // Retorna quantos encontrou
+    } catch (error) {
+        console.error("Erro na busca remota:", error);
+        return 0;
+    }
+};
+export const listarRDCs = async (page = 1, limit = 15, busca = "") => {
+    try {
+        const db = await getDb(); // Garante que o banco está aberto
+        if (page === 1 && !busca) {
+            console.log("🔄 Chamando sincronização automática...");
+            await syncRDCs(db).catch(err => console.error("Falha no sync silencioso:", err));
+        }
+        const offset = (page - 1) * limit;
+        
+        console.log(`🔎 Buscando RDCs localmente: Página ${page}, Busca: "${busca}"`);
+
+        let query = `SELECT * FROM rdc `;
+        let args = [];
+
+        if (busca) {
+            // Ajustei para procurar no server_id também
+            query += `WHERE local LIKE ? OR disciplina LIKE ? OR server_id LIKE ? `;
+            args.push(`%${busca}%`, `%${busca}%`, `%${busca}%`);
+        }
+
+        query += `ORDER BY data DESC, id DESC LIMIT ? OFFSET ?`;
+        args.push(limit, offset);
+
+        // USANDO O db DIRETAMENTE PARA EVITAR ERROS DE ESCOPO
+        const listaRaw = await db.getAllAsync(query, args);
+        
+        console.log(`📊 Total de RDCs encontrados no SQLite: ${listaRaw.length}`);
+
+        return listaRaw.map(rdc => ({
             ...rdc,
-            aprovado: rdc.aprovado === 1, // Converte 1/0 para true/false
+            aprovado: rdc.aprovado === 1,
+            // Certifique-se que no seu banco os nomes são servicos_json, hh_json...
             rdcsserv: JSON.parse(rdc.servicos_json || '[]'),
             rdcshh: JSON.parse(rdc.hh_json || '[]'),
             rdcspupin: JSON.parse(rdc.pin_json || '[]'),
-            // Mapeia IDs de FK para nomes amigáveis no frontend se necessário (server_ids)
             unidade: rdc.unidade_server_id,
-            solicitante: rdc.solicitante_server_id, 
-            aprovador: rdc.aprovador_server_id,
-            // ... outros campos
         }));
 
-        // Tenta sincronizar em background sem travar a UI
-        syncRDCs().catch((e) => console.warn("Sync RDC background error:", e.message));
-
-        return listaFormatada;
-
     } catch (error) {
-        console.error("Erro ao listar RDCs:", error);
+        console.error("❌ Erro CRÍTICO ao listar RDCs:", error);
         throw error;
     }
 };

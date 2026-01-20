@@ -25,7 +25,8 @@ const RelatorioQualidadeCard = React.memo(() => {
                 listarRelatorios(),
             ]);
             setAreas(areasData || []);
-            setRelatorios(relatoriosData || []);
+            const listaFinal = relatoriosData?.results || (Array.isArray(relatoriosData) ? relatoriosData : []);
+            setRelatorios(listaFinal);
         } catch (error) {
             console.error('Erro ao carregar dados:', error);
             setRelatorios([]);

@@ -15,16 +15,24 @@ export const fetchAreas = async () => {
     }
 };
 
-export const listarRelatorios = async () => {
+export const listarRelatorios = async (page = 1, search = '') => {
     try {
-        const { data } = await api.get('api/v1/qualidade/relatorios/');
-        return data;
+        // Adicionamos page e search como query params
+        // O Django usará esses valores para filtrar e paginar
+        const url = `api/v1/qualidade/relatorios/?page=${page}&search=${search}`;
+        const { data } = await api.get(url);
+
+        // Retornamos o objeto completo (que contém .results e .next)
+        return data; 
     } catch (error) {
         console.error('Erro ao listar relatórios:', error);
+        
         if (error.response?.status === 403) {
             throw new Error('Você não tem permissão para visualizar relatórios.');
         }
-        return [];
+
+        // Retornamos um formato padrão de erro para não quebrar a tela
+        return { results: [], next: null, count: 0 };
     }
 };
 

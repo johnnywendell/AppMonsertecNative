@@ -3,6 +3,23 @@
 import { runAsync, getAllAsync, getFirstAsync } from '../database';
 import { syncLevantamento } from './syncService'; // Importar a nova função de sync
 
+import { getDb } from '../database';
+import { api } from './api'; // Com chaves
+
+async function runBatchAsync(db, statements) {
+    // Esta é uma implementação simplificada; em um banco de dados Expo SQLite, 
+    // você usaria db.transactionAsync.
+    console.log(`⏳ Executando lote de ${statements.length} comandos SQL...`);
+    for (const stmt of statements) {
+        try {
+            await db.runAsync(stmt.sql, stmt.args);
+        } catch (e) {
+            console.error("❌ Erro ao executar statement em lote:", stmt.sql, stmt.args, e.message);
+            // Dependendo da sua necessidade, você pode lançar o erro para reverter a transação inteira
+        }
+    }
+    console.log("✅ Lote de comandos SQL concluído.");
+}
 /**
  * Insere ou atualiza um Levantamento localmente e marca para sincronização.
  * Lida com a conversão do array de itens filhos para JSON.
@@ -83,31 +100,82 @@ export const salvarLevantamentoLocal = async (dados) => {
  * Listar Levantamentos (Offline-First)
  * Recupera do SQLite e converte o JSON interno de volta para Array.
  */
-export const listarLevantamentos = async () => {
+const LVT_ENDPOINT = 'api/v1/planejamento/levantamento/';
+export const buscarLevantamentosNaAPI = async (termo) => {
     try {
-        const listaRaw = await getAllAsync(
-            "SELECT * FROM levantamento ORDER BY data DESC, id DESC"
-        );
+        console.log(`📡 Buscando Levantamentos remotamente por: "${termo}"`);
+        const response = await api.get(`${LVT_ENDPOINT}?search=${termo}`);
+        
+        // Django paginado usa .results
+        const resultados = response.data.results || [];
 
-        // Processa os dados brutos para converter JSON string -> Objeto JS
-        const listaFormatada = listaRaw.map(lvt => ({
+        if (resultados.length > 0) {
+            const db = await getDb();
+            const statements = [];
+
+            for (const lvt of resultados) {
+                statements.push({
+                    sql: `INSERT OR REPLACE INTO levantamento (
+                        server_id, data, local, tipo, obs, 
+                        unidade_server_id, projeto_cod_server_id, auth_serv_server_id,
+                        itens_pintura_json, sync_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`,
+                    args: [
+                        lvt.id, lvt.data, lvt.local, lvt.tipo, lvt.obs,
+                        lvt.unidade, lvt.projeto_cod, lvt.auth_serv,
+                        JSON.stringify(lvt.itens_pintura || []),
+                        lvt.id
+                    ]
+                });
+            }
+            await runBatchAsync(db, statements);
+            console.log(`✅ ${resultados.length} Levantamentos salvos no SQLite.`);
+        }
+        return resultados.length;
+    } catch (error) {
+        console.error("❌ Erro na busca remota de Levantamento:", error.message);
+        return 0;
+    }
+};
+
+export const listarLevantamentos = async (page = 1, limit = 15, busca = "") => {
+    try {
+        const db = await getDb();
+
+        if (page === 1 && !busca) {
+            console.log("🔄 Chamando sincronização automática de Levantamentos...");
+            await syncLevantamento(db).catch(err => console.error("Falha no sync silencioso LVT:", err));
+        }
+
+        const offset = (page - 1) * limit;
+        let query = `SELECT * FROM levantamento `;
+        let args = [];
+
+        if (busca) {
+            // CORREÇÃO AQUI: 2 '?' na query = 2 args no push
+            query += `WHERE local LIKE ? OR CAST(server_id AS TEXT) LIKE ? `;
+            args.push(`%${busca}%`, `%${busca}%`); // Removido o terceiro argumento extra
+        }
+
+        query += `ORDER BY data DESC, id DESC LIMIT ? OFFSET ?`;
+        
+        // Garante que limit e offset sejam inteiros para evitar datatype mismatch
+        args.push(parseInt(limit), parseInt(offset));
+
+        console.log(`🔎 Executando Query: ${query} | Args:`, args);
+
+        const listaRaw = await db.getAllAsync(query, args);
+        
+        return listaRaw.map(lvt => ({
             ...lvt,
-            // Filhos
             itens_pintura: JSON.parse(lvt.itens_pintura_json || '[]'),
-            // Mapeia IDs de FK para nomes amigáveis no frontend (server_ids)
             auth_serv: lvt.auth_serv_server_id,
             unidade: lvt.unidade_server_id, 
             projeto_cod: lvt.projeto_cod_server_id,
-            // ... outros campos
         }));
 
-        // Tenta sincronizar em background sem travar a UI
-        syncLevantamento().catch((e) => console.warn("Sync Levantamento background error:", e.message));
-
-        return listaFormatada;
-
     } catch (error) {
-        console.error("Erro ao listar Levantamentos:", error);
+        console.error("❌ Erro CRÍTICO ao listar Levantamentos:", error);
         throw error;
     }
 };

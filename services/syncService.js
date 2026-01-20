@@ -584,165 +584,126 @@ export async function syncProjetoCodigos() {
         console.error("❌ Sync Códigos de Projeto falhou:", err.message);
     }
 }
-const RDC_ENDPOINT = 'api/v1/planejamento/rdc/'; 
+const RDC_ENDPOINT = 'api/v1/planejamento/rdc/';
+
 export const syncRDCs = async (db) => {
     const netInfo = await NetInfo.fetch();
     if (!netInfo.isConnected) {
-        console.log('📵 Sem internet — RDCs sem sync agora.');
+        console.log('Log: 📵 Sem internet — RDCs sem sync agora.');
         return;
     }
 
-    if (!db) {
-        db = await getDb();
-    }
+    if (!db) { db = await getDb(); }
     
-    console.log("📌 Iniciando Sincronização de RDCs (UP & DOWN)...");
+    console.log("Log: 📌 Iniciando Sincronização de RDCs (UP & DOWN)...");
 
-    // 1️⃣ SYNC UP: Enviar pendentes do SQLite para API
+    // --- 1️⃣ SYNC UP (SQLite -> API) ---
     try {
-        const rdcPendentes = await db.getAllAsync(
-            "SELECT * FROM rdc WHERE sync_status='pending'" 
-        );
+        const rdcPendentes = await db.getAllAsync("SELECT * FROM rdc WHERE sync_status='pending'");
 
-        if (rdcPendentes.length === 0) {
-            console.log("✔️ Nenhum RDC pendente para envio.");
-        } else {
-            console.log(`⬆️ Enviando ${rdcPendentes.length} RDC(s) pendente(s)...`);
-
-            const updateStatements = [];
+        if (rdcPendentes.length > 0) {
+            console.log(`Log: ⬆️ Enviando ${rdcPendentes.length} RDC(s) pendente(s)...`);
 
             for (const rdc of rdcPendentes) {
                 const method = rdc.server_id ? 'PUT' : 'POST';
                 const endpoint = rdc.server_id ? `${RDC_ENDPOINT}${rdc.server_id}/` : RDC_ENDPOINT;
 
-                console.log(`[RDC ID ${rdc.id}] Preparando envio (${method}) para ${endpoint}`);
-                
                 try {
-                    // Monta o Payload para a API (Desserializando o JSON)
-                    let rdcsservParsed = JSON.parse(rdc.servicos_json || '[]');
-                    let rdcshhParsed = JSON.parse(rdc.hh_json || '[]');
-                    let rdcspupinParsed = JSON.parse(rdc.pin_json || '[]');
-                    
-                    // 🚨 LIMPEZA CRÍTICA: Remove os IDs locais dos filhos ANTES DE ENVIAR
-                    // Se o item for novo (POST), a ausência do ID garante que o backend o crie.
-                    // Se o item for edição (PUT), o backend atualiza baseando-se no ID do PAI.
                     const payload = {
-                        // ... campos principais ...
-                        data: ensureString(rdc.data), 
-                        local: ensureString(rdc.local),
-                        tipo: ensureString(rdc.tipo),
-                        disciplina: ensureString(rdc.disciplina),
-                        clima: ensureString(rdc.clima),
+                        data: rdc.data,
+                        local: rdc.local,
+                        tipo: rdc.tipo,
+                        disciplina: rdc.disciplina,
+                        clima: rdc.clima,
                         obs: rdc.obs,
                         aprovado: rdc.aprovado === 1,
                         encarregado: rdc.encarregado,
                         inicio: rdc.inicio,
                         termino: rdc.termino,
-                        doc: null, 
-
-                        // IDs de Chave Estrangeira (FKs)
+                        // Foreign Keys: Garantir que enviamos o ID esperado pelo Django
                         unidade: rdc.unidade_server_id,
                         solicitante: rdc.solicitante_server_id,
                         aprovador: rdc.aprovador_server_id,
                         projeto_cod: rdc.projeto_cod_server_id,
                         AS: rdc.AS_server_id,
                         bm: rdc.bm_server_id,
-
-                        // Itens aninhados (Reverse FKs) - ESSENCIAL: Limpeza dos IDs locais
-                        rdcsserv: cleanNestedIds(rdcsservParsed),
-                        rdcshh: cleanNestedIds(rdcshhParsed),
-                        rdcspupin: cleanNestedIds(rdcspupinParsed),
+                        // Nested: Limpando IDs para evitar conflito no Django
+                        rdcsserv: cleanNestedIds(JSON.parse(rdc.servicos_json || '[]')),
+                        rdcshh: cleanNestedIds(JSON.parse(rdc.hh_json || '[]')),
+                        rdcspupin: cleanNestedIds(JSON.parse(rdc.pin_json || '[]')),
                     };
-                    
-                    // ... (restante da lógica de log e envio) ...
-                    console.log(`[RDC ID ${rdc.id}] Payload Nested (Servicos count): ${payload.rdcsserv.length}`);
 
-                    let response;
-                    if (rdc.server_id) {
-                        response = await api.put(endpoint, payload);
-                    } else {
-                        response = await api.post(endpoint, payload);
-                    }
-                    // ... (continua com a atualização de server_id e sync_status) ...
+                    let response = rdc.server_id ? await api.put(endpoint, payload) : await api.post(endpoint, payload);
                     
-                    const serverRdc = response.data;
-                    console.log(`✅ [RDC ID ${rdc.id}] Sucesso! Retornado Server ID: ${serverRdc.id}`);
-                    
-                    // Sucesso: Prepara o statement para atualizar o BD local
-                    updateStatements.push({
-                        sql: `UPDATE rdc SET 
-                                    server_id=?, sync_status='synced', updated_at=CURRENT_TIMESTAMP 
-                                WHERE id=?`,
-                        args: [serverRdc.id, rdc.id], // serverRdc.id é o ID retornado pelo servidor
-                    });
+                    // Atualiza o registro local com o ID do servidor
+                    await db.runAsync(
+                        "UPDATE rdc SET server_id=?, sync_status='synced', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        [response.data.id, rdc.id]
+                    );
+                    console.log(`Log: ✅ [RDC ID ${rdc.id}] Sincronizado com sucesso.`);
 
                 } catch (error) {
-                    console.error(`❌ [RDC ID ${rdc.id}] Erro ao enviar para API:`, error.message);
-                    if (error.response && error.response.data) {
-                        console.error(`   [RDC ID ${rdc.id}] Detalhes da API:`, JSON.stringify(error.response.data, null, 2));
-                    }
+                    console.error(`Log: ❌ Erro ao enviar RDC ${rdc.id}:`, error.response?.data || error.message);
                 }
-            }
-            
-            // Executa a atualização de todos os status em lote
-            if (updateStatements.length > 0) {
-                await runBatchAsync(db, updateStatements);
-                console.log(`🎉 Envio de ${updateStatements.length} RDC(s) concluído com sucesso.`);
             }
         }
     } catch (err) {
-        console.error("❌ Sync UP RDC falhou:", err.message);
+        console.error("Log: ❌ Erro no Sync UP:", err.message);
     }
-    
-    // 2️⃣ SYNC DOWN: Buscar do servidor e atualizar SQLite
+
+    // --- 2️⃣ SYNC DOWN (API -> SQLite) ---
     try {
-        console.log("⬇️ Baixando RDCs do servidor...");
-        const { data: serverRDCs } = await api.get(RDC_ENDPOINT); 
-
-        // Marca todos os registros locais 'synced' como 'deleted'
-        await db.runAsync("UPDATE rdc SET sync_status = 'deleted' WHERE sync_status = 'synced'");
+        console.log("Log: ⬇️ Baixando dados do servidor...");
+        // Buscamos a primeira página (os mais recentes)
+        const response = await api.get(`${RDC_ENDPOINT}?page=1`);
         
-        const syncDownStatements = [];
+        // Trata a paginação do Django (.results)
+        const serverRDCs = response.data.results || [];
+        console.log(`Log: 📡 Recebidos ${serverRDCs.length} RDCs do servidor.`);
 
-        for (const apiRdc of serverRDCs) {
-            // Re-serializa os arrays aninhados para JSON para armazenamento local
-            const servicos_json = JSON.stringify(apiRdc.rdcsserv || []);
-            const hh_json = JSON.stringify(apiRdc.rdcshh || []);
-            const pin_json = JSON.stringify(apiRdc.rdcspupin || []);
+        if (serverRDCs.length > 0) {
+            const syncDownStatements = [];
 
-            // Assumindo que a API retorna todos os dados, incluindo os IDs aninhados (server_id)
-            syncDownStatements.push({
-                sql: `INSERT OR REPLACE INTO rdc (
+            for (const apiRdc of serverRDCs) {
+                // Preparamos os JSONs para salvar no SQLite
+                const servicos_json = JSON.stringify(apiRdc.rdcsserv || []);
+                const hh_json = JSON.stringify(apiRdc.rdcshh || []);
+                const pin_json = JSON.stringify(apiRdc.rdcspupin || []);
+
+                syncDownStatements.push({
+                    sql: `INSERT OR REPLACE INTO rdc (
                             server_id, data, local, tipo, disciplina, obs, aprovado, encarregado, clima, inicio, termino, doc,
                             unidade_server_id, solicitante_server_id, aprovador_server_id, projeto_cod_server_id, AS_server_id, bm_server_id,
                             servicos_json, hh_json, pin_json, sync_status, id 
                         ) VALUES (
                             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 
-                            (SELECT id FROM rdc WHERE server_id = ?) -- Preserva o ID local se existir
+                            (SELECT id FROM rdc WHERE server_id = ?) 
                         )`,
-                args: [
-                    apiRdc.id, apiRdc.data, apiRdc.local, apiRdc.tipo, apiRdc.disciplina, apiRdc.obs, apiRdc.aprovado ? 1 : 0, 
-                    apiRdc.encarregado, apiRdc.clima, apiRdc.inicio, apiRdc.termino, apiRdc.doc,
-                    apiRdc.unidade, apiRdc.solicitante, apiRdc.aprovador, apiRdc.projeto_cod, apiRdc.AS, apiRdc.bm,
-                    servicos_json, hh_json, pin_json, apiRdc.id
-                ]
-            });
-        }
+                    args: [
+                        apiRdc.id, apiRdc.data, apiRdc.local, apiRdc.tipo, apiRdc.disciplina, apiRdc.obs, apiRdc.aprovado ? 1 : 0, 
+                        apiRdc.encarregado, apiRdc.clima, apiRdc.inicio, apiRdc.termino, apiRdc.doc,
+                        // Mapeamento: O Django costuma retornar o ID direto ou objeto.id
+                        apiRdc.unidade?.id || apiRdc.unidade,
+                        apiRdc.solicitante?.id || apiRdc.solicitante,
+                        apiRdc.aprovador?.id || apiRdc.aprovador,
+                        apiRdc.projeto_cod?.id || apiRdc.projeto_cod,
+                        apiRdc.AS?.id || apiRdc.AS,
+                        apiRdc.bm?.id || apiRdc.bm,
+                        servicos_json, hh_json, pin_json,
+                        apiRdc.id // para o sub-select do ID local
+                    ]
+                });
+            }
 
-        if (syncDownStatements.length > 0) {
+            // EXECUTAR O LOTE NO BANCO LOCAL
             await runBatchAsync(db, syncDownStatements);
-            console.log(`📥 Banco RDC atualizado — total API: ${serverRDCs.length} RDCs`);
-        } else {
-            console.log("✔️ Nenhuma RDC nova baixada.");
+            console.log("Log: 📥 Banco local atualizado com os dados da API.");
         }
-        
-        // Remove os itens locais marcados como 'deleted' que não estão mais no servidor
-        await db.runAsync("DELETE FROM rdc WHERE sync_status = 'deleted'");
-
     } catch (err) {
-        console.error("❌ Sync DOWN RDC falhou:", err.message);
+        console.error("Log: ❌ Sync DOWN RDC falhou:", err.response?.data || err.message);
     }
-    console.log("🔄 Sincronização de RDCs finalizada.");
+
+    console.log("Log: 🔄 Sincronização finalizada.");
 };
 
 const LEVANTAMENTO_ENDPOINT = 'api/v1/planejamento/levantamento/';
@@ -752,216 +713,196 @@ const PINTURA_JSON_COLUMN = 'itens_pintura_json'; // Nome da coluna JSON no SQLi
 export const syncLevantamento = async (db) => {
     const netInfo = await NetInfo.fetch();
     if (!netInfo.isConnected) {
-        console.log('📵 Sem internet — Levantamentos sem sync agora.');
+        console.log('Log: 📵 Sem internet — Levantamentos sem sync agora.');
         return;
     }
 
-    if (!db) {
-        db = await getDb();
-    }
+    if (!db) { db = await getDb(); }
     
-    console.log("📌 Iniciando Sincronização de Levantamentos (UP & DOWN)...");
+    console.log("Log: 📌 Iniciando Sincronização de Levantamentos (UP & DOWN)...");
 
-    // 1️⃣ SYNC UP: Enviar pendentes do SQLite para API
+    // --- 1️⃣ SYNC UP (SQLite -> API) ---
     try {
         const levantamentosPendentes = await db.getAllAsync(
-            `SELECT * FROM ${LEVANTAMENTO_TABLE} WHERE sync_status='pending'` 
+            `SELECT * FROM ${LEVANTAMENTO_TABLE} WHERE sync_status='pending'`
         );
 
-        if (levantamentosPendentes.length === 0) {
-            console.log("✔️ Nenhum Levantamento pendente para envio.");
-        } else {
-            console.log(`⬆️ Enviando ${levantamentosPendentes.length} Levantamento(s) pendente(s)...`);
-
-            const updateStatements = [];
+        if (levantamentosPendentes.length > 0) {
+            console.log(`Log: ⬆️ Enviando ${levantamentosPendentes.length} Levantamento(s) pendente(s)...`);
 
             for (const lvt of levantamentosPendentes) {
                 const method = lvt.server_id ? 'PUT' : 'POST';
                 const endpoint = lvt.server_id ? `${LEVANTAMENTO_ENDPOINT}${lvt.server_id}/` : LEVANTAMENTO_ENDPOINT;
 
-                console.log(`[LVT ID ${lvt.id}] Preparando envio (${method}) para ${endpoint}`);
-                
                 try {
-                    // Monta o Payload para a API (Desserializando o JSON do item filho)
-                    let itensPinturaParsed = JSON.parse(lvt[PINTURA_JSON_COLUMN] || '[]');
-                    
-                    // 🚨 LIMPEZA CRÍTICA: Remove os IDs locais dos filhos ANTES DE ENVIAR
                     const payload = {
-                        // ... campos principais do Levantamento ...
-                        data: lvt.data, 
+                        data: lvt.data,
                         escopo: lvt.escopo,
                         local: lvt.local,
-                        // doc: lvt.doc, // Arquivos devem ser tratados com FormData, mas mantemos nulo aqui por simplicidade
-
-                        // IDs de Chave Estrangeira (FKs)
+                        obs: lvt.obs,
+                        // Foreign Keys (Mapeamento para o Django)
                         auth_serv: lvt.auth_serv_server_id,
                         unidade: lvt.unidade_server_id,
                         projeto_cod: lvt.projeto_cod_server_id,
-
-                        // Itens aninhados (Reverse FK) - ESSENCIAL: Limpeza dos IDs locais
-                        [PINTURA_CHILD_KEY]: cleanNestedIds(itensPinturaParsed),
+                        // Itens aninhados com limpeza de ID local
+                        [PINTURA_CHILD_KEY]: cleanNestedIds(JSON.parse(lvt[PINTURA_JSON_COLUMN] || '[]')),
                     };
-                    
-                    console.log(`[LVT ID ${lvt.id}] Payload Nested (${PINTURA_CHILD_KEY} count): ${payload[PINTURA_CHILD_KEY].length}`);
 
-                    let response;
-                    if (lvt.server_id) {
-                        response = await api.put(endpoint, payload);
-                    } else {
-                        response = await api.post(endpoint, payload);
-                    }
+                    const response = lvt.server_id 
+                        ? await api.put(endpoint, payload) 
+                        : await api.post(endpoint, payload);
                     
-                    const serverLvt = response.data;
-                    console.log(`✅ [LVT ID ${lvt.id}] Sucesso! Retornado Server ID: ${serverLvt.id}`);
-                    
-                    // Sucesso: Prepara o statement para atualizar o BD local
-                    updateStatements.push({
-                        sql: `UPDATE ${LEVANTAMENTO_TABLE} SET 
-                                    server_id=?, sync_status='synced', updated_at=CURRENT_TIMESTAMP 
-                                WHERE id=?`,
-                        args: [serverLvt.id, lvt.id], // serverLvt.id é o ID retornado pelo servidor
-                    });
+                    // Atualiza o registro local com o ID retornado do servidor
+                    await db.runAsync(
+                        `UPDATE ${LEVANTAMENTO_TABLE} SET server_id=?, sync_status='synced', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+                        [response.data.id, lvt.id]
+                    );
+                    console.log(`Log: ✅ [LVT ID ${lvt.id}] Sincronizado com sucesso.`);
 
                 } catch (error) {
-                    console.error(`❌ [LVT ID ${lvt.id}] Erro ao enviar para API:`, error.message);
-                    if (error.response && error.response.data) {
-                        console.error(`   [LVT ID ${lvt.id}] Detalhes da API:`, JSON.stringify(error.response.data, null, 2));
-                    }
+                    console.error(`Log: ❌ Erro ao enviar LVT ${lvt.id}:`, error.response?.data || error.message);
                 }
             }
-            
-            // Executa a atualização de todos os status em lote
-            if (updateStatements.length > 0) {
-                await runBatchAsync(db, updateStatements);
-                console.log(`🎉 Envio de ${updateStatements.length} Levantamento(s) concluído com sucesso.`);
-            }
         }
     } catch (err) {
-        console.error("❌ Sync UP Levantamento falhou:", err.message);
+        console.error("Log: ❌ Erro no Sync UP Levantamento:", err.message);
     }
-    
-    // 2️⃣ SYNC DOWN: Buscar do servidor e atualizar SQLite
+
+    // --- 2️⃣ SYNC DOWN (API -> SQLite) ---
     try {
-        console.log("⬇️ Baixando Levantamentos do servidor...");
-        const { data: serverLvts } = await api.get(LEVANTAMENTO_ENDPOINT); 
-
-        // Marca todos os registros locais 'synced' como 'deleted'
-        await db.runAsync(`UPDATE ${LEVANTAMENTO_TABLE} SET sync_status = 'deleted' WHERE sync_status = 'synced'`);
+        console.log("Log: ⬇️ Baixando Levantamentos do servidor...");
+        // Buscamos a primeira página para o sync padrão
+        const response = await api.get(`${LEVANTAMENTO_ENDPOINT}?page=1`);
         
-        const syncDownStatements = [];
+        // Trata a paginação do Django (.results)
+        const serverLvts = response.data.results || [];
+        console.log(`Log: 📡 Recebidos ${serverLvts.length} Levantamentos do servidor.`);
 
-        for (const apiLvt of serverLvts) {
-            // Re-serializa o array aninhado para JSON para armazenamento local
-            const pintura_json = JSON.stringify(apiLvt[PINTURA_CHILD_KEY] || []);
+        if (serverLvts.length > 0) {
+            const syncDownStatements = [];
 
-            // Assumindo que a API retorna todos os dados, incluindo os IDs aninhados (server_id)
-            syncDownStatements.push({
-                sql: `INSERT OR REPLACE INTO ${LEVANTAMENTO_TABLE} (
-                            server_id, data, escopo, local, doc,
-                            auth_serv_server_id, unidade_server_id, projeto_cod_server_id,
-                            ${PINTURA_JSON_COLUMN}, sync_status, id 
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 
-                            (SELECT id FROM ${LEVANTAMENTO_TABLE} WHERE server_id = ?) 
-                        )`,
-                args: [
-                    apiLvt.id, apiLvt.data, apiLvt.escopo, apiLvt.local, apiLvt.doc,
-                    apiLvt.auth_serv, apiLvt.unidade, apiLvt.projeto_cod,
-                    pintura_json, apiLvt.id
-                ]
-            });
-        }
+            for (const apiLvt of serverLvts) {
+                // Preparamos o JSON dos itens filhos
+                const pintura_json = JSON.stringify(apiLvt[PINTURA_CHILD_KEY] || []);
 
-        if (syncDownStatements.length > 0) {
+                syncDownStatements.push({
+                            sql: `INSERT OR REPLACE INTO ${LEVANTAMENTO_TABLE} (
+                                    server_id, data, escopo, local, doc,
+                                    auth_serv_server_id, unidade_server_id, projeto_cod_server_id,
+                                    ${PINTURA_JSON_COLUMN}, sync_status, id 
+                                ) VALUES (
+                                    ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 
+                                    (SELECT id FROM ${LEVANTAMENTO_TABLE} WHERE server_id = ?) 
+                                )`,
+                            args: [
+                                apiLvt.id,
+                                apiLvt.data,
+                                apiLvt.escopo,
+                                apiLvt.local,
+                                apiLvt.doc,
+                                // Foreign Keys
+                                apiLvt.auth_serv?.id || apiLvt.auth_serv,
+                                apiLvt.unidade?.id || apiLvt.unidade,
+                                apiLvt.projeto_cod?.id || apiLvt.projeto_cod,
+                                JSON.stringify(apiLvt[PINTURA_CHILD_KEY] || []),
+                                apiLvt.id // para o sub-select
+                            ]
+                        });
+            }
+
             await runBatchAsync(db, syncDownStatements);
-            console.log(`📥 Banco Levantamento atualizado — total API: ${serverLvts.length} Levantamentos`);
-        } else {
-            console.log("✔️ Nenhum Levantamento novo baixado.");
+            console.log("Log: 📥 Banco local de Levantamentos atualizado.");
         }
-        
-        // Remove os itens locais marcados como 'deleted' que não estão mais no servidor
-        await db.runAsync(`DELETE FROM ${LEVANTAMENTO_TABLE} WHERE sync_status = 'deleted'`);
-
     } catch (err) {
-        console.error("❌ Sync DOWN Levantamento falhou:", err.message);
+        console.error("Log: ❌ Sync DOWN Levantamento falhou:", err.response?.data || err.message);
     }
-    console.log("🔄 Sincronização de Levantamentos finalizada.");
+
+    console.log("Log: 🔄 Sincronização de Levantamentos finalizada.");
 };
 
 
 const AS_ENDPOINT = 'api/v1/planejamento/as/'; // Ajuste o endpoint conforme sua API
-export async function syncAS() {
-    const { isConnected } = await NetInfo.fetch();
-    if (!isConnected) {
-        console.log('📵 Sem internet — ASs sem sync agora');
+export const syncAS = async (db) => {
+    const netInfo = await NetInfo.fetch();
+    if (!netInfo.isConnected) {
+        console.log('Log: 📵 Sem internet — ASs sem sync agora.');
         return;
     }
 
-    const db = await getDb();
+    if (!db) { db = await getDb(); }
+    
+    console.log("Log: 📌 Iniciando Sincronização de ASs (UP & DOWN)...");
 
+    // --- 1️⃣ SYNC UP (SQLite -> API) ---
     try {
-        console.log("📌 Sincronizando ASs...");
-
-        // 1️⃣ SYNC UP: Enviar pendentes do SQLite para API
-        const pendentes = await db.getAllAsync(
-            "SELECT * FROM ass WHERE sync_status = 'pending' OR sync_status = 'update_pending'"
+        const asPendentes = await db.getAllAsync(
+            "SELECT * FROM ass WHERE sync_status='pending' OR sync_status='update_pending'"
         );
 
-        for (const asLocal of pendentes) {
-            try {
-                // Monta o Payload para o Django (usando server_id das FKs)
-                const payload = {
-                    data: asLocal.data,
-                    status_as: asLocal.status_as,
-                    tipo: asLocal.tipo,
-                    disciplina: asLocal.disciplina,
-                    escopo: asLocal.escopo,
-                    local: asLocal.local,
-                    obs: asLocal.obs,
-                    rev: asLocal.rev,
-                    as_sap: asLocal.as_sap,
-                    as_antiga: asLocal.as_antiga,
+        if (asPendentes.length > 0) {
+            console.log(`Log: ⬆️ Enviando ${asPendentes.length} AS(s) pendente(s)...`);
+
+            for (const asLocal of asPendentes) {
+                const method = asLocal.server_id ? 'PUT' : 'POST';
+                const endpoint = asLocal.server_id ? `${AS_ENDPOINT}${asLocal.server_id}/` : AS_ENDPOINT;
+
+                try {
+                    const payload = {
+                        data: asLocal.data,
+                        status_as: asLocal.status_as,
+                        tipo: asLocal.tipo,
+                        disciplina: asLocal.disciplina,
+                        escopo: asLocal.escopo,
+                        local: asLocal.local,
+                        obs: asLocal.obs,
+                        rev: asLocal.rev,
+                        as_sap: asLocal.as_sap,
+                        as_antiga: asLocal.as_antiga,
+                        // Foreign Keys (Mapeamento para o que o Django espera)
+                        unidade: asLocal.unidade_server_id,
+                        solicitante: asLocal.solicitante_server_id,
+                        aprovador: asLocal.aprovador_server_id,
+                        projeto_cod: asLocal.projeto_cod_server_id,
+                    };
+
+                    const response = await api({
+                        method,
+                        url: endpoint,
+                        data: payload
+                    });
                     
-                    // Chaves Estrangeiras (Mapeamento direto para IDs do Servidor)
-                    unidade_id: asLocal.unidade_server_id,
-                    solicitante_id: asLocal.solicitante_server_id,
-                    aprovador_id: asLocal.aprovador_server_id,
-                    projeto_cod_id: asLocal.projeto_cod_server_id,
-                };
+                    // Atualiza o registro local com o ID do servidor
+                    await db.runAsync(
+                        "UPDATE ass SET server_id=?, sync_status='synced' WHERE id=?",
+                        [response.data.id, asLocal.id]
+                    );
+                    console.log(`Log: ✅ [AS ID ${asLocal.id}] Sincronizada com sucesso.`);
 
-                let resp;
-                
-                if (asLocal.server_id) {
-                    // Atualização (PUT)
-                    resp = await api.put(`${AS_ENDPOINT}${asLocal.server_id}/`, payload);
-                    console.log(`☑️ AS atualizada Server ID ${asLocal.server_id}`);
-                } else {
-                    // Criação (POST)
-                    resp = await api.post(AS_ENDPOINT, payload);
-                    console.log(`☑️ AS criada Server ID ${resp.data.id}`);
+                } catch (error) {
+                    console.error(`Log: ❌ Erro ao enviar AS ${asLocal.id}:`, error.response?.data || error.message);
                 }
-                
-                // Atualiza o status local
-                await db.runAsync(
-                    "UPDATE ass SET sync_status = 'synced', server_id = ? WHERE id = ?",
-                    [resp.data.id, asLocal.id]
-                );
-
-            } catch (e) {
-                console.warn(`⚠️ Falha ao enviar AS pendente ID ${asLocal.id}:`, e.message);
             }
         }
+    } catch (err) {
+        console.error("Log: ❌ Erro no Sync UP AS:", err.message);
+    }
 
-        // 2️⃣ SYNC DOWN: Buscar do servidor e atualizar SQLite
-        const { data } = await api.get(AS_ENDPOINT);
+    // --- 2️⃣ SYNC DOWN (API -> SQLite) ---
+    try {
+    console.log("Log: ⬇️ Baixando ASs do servidor...");
+    const response = await api.get(`${AS_ENDPOINT}?page=1`);
+    
+    // O ERRO ESTAVA AQUI: O Django retorna um objeto, a lista real fica em .results
+    // Adicionamos o "|| []" para garantir que seja sempre um iterável
+    const serverASs = response.data.results || (Array.isArray(response.data) ? response.data : []);
 
-        // Marca todos os registros locais 'synced' como 'deleted'
-        await db.runAsync("UPDATE ass SET sync_status = 'deleted' WHERE sync_status = 'synced'");
+    if (serverASs.length > 0) {
+        const syncDownStatements = [];
 
-        await db.withTransactionAsync(async () => {
-             for (const apiAs of data) {
-                await db.runAsync(
-                    `INSERT OR REPLACE INTO ass (
+        // Agora o 'for' não vai falhar, pois serverASs é garantidamente um Array
+        for (const apiAs of serverASs) {
+            syncDownStatements.push({
+                sql: `INSERT OR REPLACE INTO ass (
                         server_id, unidade_server_id, solicitante_server_id, aprovador_server_id, projeto_cod_server_id,
                         data, status_as, tipo, disciplina, escopo, local, obs, rev, as_sap, as_antiga,
                         sync_status, id 
@@ -969,29 +910,37 @@ export async function syncAS() {
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 
                         (SELECT id FROM ass WHERE server_id = ?) 
                     )`,
-                    [
-                        apiAs.id, 
-                        apiAs.unidade, // ID do servidor
-                        apiAs.solicitante, // ID do servidor
-                        apiAs.aprovador, // ID do servidor
-                        apiAs.projeto_cod, // ID do servidor
-                        apiAs.data, apiAs.status_as, apiAs.tipo, apiAs.disciplina, apiAs.escopo, 
-                        apiAs.local, apiAs.obs, apiAs.rev, apiAs.as_sap, apiAs.as_antiga,
-                        apiAs.id 
-                    ]
-                );
-            }
-        });
-       
-        // Remove os itens marcados como 'deleted'
-        await db.runAsync("DELETE FROM ass WHERE sync_status = 'deleted'");
+                args: [
+                    apiAs.id, 
+                    apiAs.unidade?.id || apiAs.unidade || null,
+                    apiAs.solicitante?.id || apiAs.solicitante || null,
+                    apiAs.aprovador?.id || apiAs.aprovador || null,
+                    apiAs.projeto_cod?.id || apiAs.projeto_cod || null,
+                    apiAs.data, 
+                    apiAs.status_as, 
+                    apiAs.tipo, 
+                    apiAs.disciplina, 
+                    apiAs.escopo, 
+                    apiAs.local, 
+                    apiAs.obs, 
+                    apiAs.rev, 
+                    apiAs.as_sap, 
+                    apiAs.as_antiga,
+                    apiAs.id 
+                ]
+            });
+        }
 
-        console.log(`📥 Banco de ASs atualizado — total API: ${data.length} ASs`);
-
-    } catch (err) {
-        console.error("❌ Sync ASs falhou:", err.message);
+        await runBatchAsync(db, syncDownStatements);
+        console.log(`Log: 📥 Banco local atualizado — ${serverASs.length} ASs sincronizadas.`);
     }
+} catch (err) {
+    console.error("Log: ❌ Sync DOWN AS falhou:", err.message);
 }
+
+    console.log("Log: 🔄 Sincronização de AS finalizada.");
+};
+
 const BM_ENDPOINT = 'api/v1/planejamento/boletimmedicao/'; // Ajuste o endpoint conforme sua API
 export async function syncBoletimMedicao() {
     const { isConnected } = await NetInfo.fetch();
@@ -1104,273 +1053,80 @@ export async function syncBoletimMedicao() {
 
 async function syncRelatorios(db) {
     const netInfo = await NetInfo.fetch();
-    if (!netInfo.isConnected) {
-        console.log('Sem conexão, sincronização de relatórios adiada');
-        return;
-    }
+    if (!netInfo.isConnected) return;
 
     try {
-        // Sincronizar relatórios pendentes
-        const pendingRelatorios = await db.getAllAsync(
-            `SELECT * FROM relatorios WHERE sync_status = 'pending'`
-        );
+        // 1. ENVIAR PENDENTES (Local -> Servidor)
+        const locais = await db.getAllAsync("SELECT * FROM relatorios WHERE sync_status = 'pending'");
 
-        for (const relatorio of pendingRelatorios) {
+        for (const item of locais) {
             try {
-                const etapas = await db.getAllAsync(
-                    'SELECT * FROM etapas_pintura WHERE relatorio_id = ? AND sync_status = "pending"',
-                    [relatorio.id]
-                );
-                const fotos = await db.getAllAsync(
-                    'SELECT * FROM photos WHERE relatorio_id = ? AND sync_status = "pending"',
-                    [relatorio.id]
-                );
-
-                // supondo que serverRelatorio.unidade é server-side id (ex: 123)
-                let unidadeLocalId = null;
-
-                if (serverRelatorio.unidade) {
-                    // tenta por server_id (se a coluna existir)
-                    try {
-                        const areaByServer = await db.getFirstAsync('SELECT id FROM areas WHERE server_id = ?', [serverRelatorio.unidade]);
-                        if (areaByServer) unidadeLocalId = areaByServer.id;
-                    } catch (e) {
-                        // provavelmente coluna server_id não existe — ignoramos esse erro
-                    }
-
-                    if (!unidadeLocalId) {
-                        // tenta pelo nome: pega a área do servidor (caso não esteja no cache, buscamos online)
-                        let serverAreasJson = await AsyncStorage.getItem('@server_areas');
-                        let serverAreas = serverAreasJson ? JSON.parse(serverAreasJson) : null;
-
-                        if (!serverAreas) {
-                            // tenta buscar do servidor (se estiver online)
-                            try {
-                                const { data } = await api.get('api/v1/geral/areas/');
-                                serverAreas = data;
-                                await AsyncStorage.setItem('@server_areas', JSON.stringify(serverAreas));
-                            } catch (err) {
-                                console.warn('Não foi possível buscar áreas do servidor para mapear unidadeLocalId:', err?.message || err);
-                                serverAreas = [];
-                            }
-                        }
-
-                        const found = serverAreas.find(a => a.id === serverRelatorio.unidade);
-                        if (found) {
-                            // mapear para id local por nome
-                            const local = await db.getFirstAsync('SELECT id FROM areas WHERE nome = ?', [found.nome]);
-                            if (local) unidadeLocalId = local.id;
-                        }
-                    }
-                }
-
+                // Buscamos os dados vinculados
+                const eLocais = await db.getAllAsync("SELECT * FROM etapas_pintura WHERE relatorio_id = ?", [item.id]);
+                const fLocais = await db.getAllAsync("SELECT * FROM photos WHERE relatorio_id = ?", [item.id]);
 
                 const payload = {
-                    cliente: relatorio.cliente || null,
-                    data: relatorio.data || null,
-                    rec: relatorio.rec || null,
-                    nota: relatorio.nota || null,
-                    tag: relatorio.tag || null,
-                    tipo_serv: relatorio.tipo_serv || null,
-                    unidade: unidadeServerId,
-                    contrato: relatorio.contrato || null,
-                    setor: relatorio.setor || null,
-                    corrosividade: relatorio.corrosividade || null,
-                    fiscal: relatorio.fiscal || null,
-                    inspetor: relatorio.inspetor || null,
-                    inicio: relatorio.inicio || null,
-                    termino: relatorio.termino || null,
-                    tratamento: relatorio.tratamento || null,
-                    tipo_subs: relatorio.tipo_subs || null,
-                    temp_ambiente: relatorio.temp_ambiente || null,
-                    ura: relatorio.ura || null,
-                    po: relatorio.po || null,
-                    temp_super: relatorio.temp_super || null,
-                    intemperismo: relatorio.intemperismo || null,
-                    descontaminacao: relatorio.descontaminacao || null,
-                    poeira_tam: relatorio.poeira_tam || null,
-                    poeira_quant: relatorio.poeira_quant || null,
-                    teor_sais: relatorio.teor_sais || null,
-                    ambiente_pintura: relatorio.ambiente_pintura || null,
-                    rugosidade: relatorio.rugosidade || null,
-                    laudo: !!relatorio.laudo,
-                    rnc_n: !!relatorio.rnc_n,
-                    obs_inst: relatorio.obs_inst || null,
-                    obs_final: relatorio.obs_final || null,
-                    aprovado: !!relatorio.aprovado,
-                    m2: relatorio.m2 || null,
-                    checklist_n: relatorio.checklist_n || null,
-                    relatorios: etapas.map(etapa => ({
-                        tinta: etapa.tinta || null,
-                        lote_a: etapa.lote_a || null,
-                        val_a: etapa.val_a || null,
-                        lote_b: etapa.lote_b || null,
-                        val_b: etapa.val_b || null,
-                        lote_c: etapa.lote_c || null,
-                        val_c: etapa.val_c || null,
-                        cor_munsell: etapa.cor_munsell || null,
-                        temp_amb: etapa.temp_amb || null,
-                        ura: etapa.ura || null,
-                        po: etapa.po || null,
-                        temp_substrato: etapa.temp_substrato || null,
-                        diluente: etapa.diluente || null,
-                        met_aplic: etapa.met_aplic || null,
-                        inicio: etapa.inicio || null,
-                        termino: etapa.termino || null,
-                        inter_repintura: etapa.inter_repintura || null,
-                        epe: etapa.epe || null,
-                        eps: etapa.eps || null,
-                        insp_visual: etapa.insp_visual || null,
-                        aderencia: etapa.aderencia || null,
-                        holiday: etapa.holiday || null,
-                        laudo: etapa.laudo || null,
-                        data_insp: etapa.data_insp || null,
-                        pintor: etapa.pintor || null,
+                    ...item,
+                    // Garantimos que enviamos arrays, mesmo que vazios
+                    relatorios: (eLocais || []).map(e => ({
+                        tinta: e.tinta,
+                        // ... adicione os outros campos aqui
+                        pintor: e.pintor
                     })),
-                    relatorio: fotos.map(f => ({ photo: f.photo_path })),
+                    relatorio: (fLocais || []).map(f => ({ photo: f.photo_path }))
                 };
 
-                const response = await api.post('api/v1/qualidade/relatorios/', payload);
-                const serverId = response.data.id;
+                // Limpamos campos que o Django não aceita no POST
+                delete payload.id;
+                delete payload.sync_status;
+                delete payload.server_id;
 
-                await db.runAsync(
-                    'UPDATE relatorios SET sync_status = "synced", server_id = ? WHERE id = ?',
-                    [serverId, relatorio.id]
-                );
-                for (const etapa of etapas) {
-                    await db.runAsync(
-                        'UPDATE etapas_pintura SET sync_status = "synced" WHERE id = ?',
-                        [etapa.id]
-                    );
-                }
-                for (const foto of fotos) {
-                    await db.runAsync(
-                        'UPDATE photos SET sync_status = "synced" WHERE id = ?',
-                        [foto.id]
-                    );
-                }
-                console.log(`Relatório ${relatorio.id} sincronizado com server_id ${serverId}`);
-            } catch (error) {
-                console.error(`Erro ao sincronizar relatório ${relatorio.id}:`, error.message);
+                await api.post('api/v1/qualidade/relatorios/', payload);
+                
+                // Marcar como sincronizado
+                await db.runAsync('UPDATE relatorios SET sync_status = "synced" WHERE id = ?', [item.id]);
+            } catch (err) {
+                console.error("Erro ao subir item:", item.id, err.message);
             }
         }
 
-        // Sincronizar relatórios do servidor
-        const { data: serverRelatorios } = await api.get('api/v1/qualidade/relatorios/');
+        // 2. DOWNLOAD (Servidor -> Local)
+        const response = await api.get('api/v1/qualidade/relatorios/');
+        // IMPORTANTE: O Django Rest Framework com paginação coloca a lista em .results
+        const vindosDoServidor = response.data.results || [];
+
+        // Limpar locais sincronizados antes de repopular
         await db.runAsync('DELETE FROM relatorios WHERE sync_status = "synced"');
-        await db.runAsync('DELETE FROM etapas_pintura WHERE sync_status = "synced"');
-        await db.runAsync('DELETE FROM photos WHERE sync_status = "synced"');
 
-        for (const serverRelatorio of serverRelatorios) {
-            let unidadeLocalId = null;
-            if (serverRelatorio.unidade) {
-                const area = await db.getFirstAsync(
-                    'SELECT id FROM areas WHERE server_id = ?',
-                    [serverRelatorio.unidade]
-                );
-                unidadeLocalId = area ? area.id : null;
-            }
-
-            const result = await db.runAsync(
-                `INSERT INTO relatorios (
-                    id, cliente, data, rec, nota, tag, tipo_serv, unidade, contrato, setor,
-                    corrosividade, fiscal, inspetor, inicio, termino, tratamento, tipo_subs,
-                    temp_ambiente, ura, po, temp_super, intemperismo, descontaminacao,
-                    poeira_tam, poeira_quant, teor_sais, ambiente_pintura, rugosidade,
-                    laudo, rnc_n, obs_inst, obs_final, aprovado, m2, checklist_n, sync_status, server_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [
-                    serverRelatorio.id,
-                    serverRelatorio.cliente || null,
-                    serverRelatorio.data || null,
-                    serverRelatorio.rec || null,
-                    serverRelatorio.nota || null,
-                    serverRelatorio.tag || null,
-                    serverRelatorio.tipo_serv || null,
-                    unidadeLocalId,
-                    serverRelatorio.contrato || null,
-                    serverRelatorio.setor || null,
-                    serverRelatorio.corrosividade || null,
-                    serverRelatorio.fiscal || null,
-                    serverRelatorio.inspetor || null,
-                    serverRelatorio.inicio || null,
-                    serverRelatorio.termino || null,
-                    serverRelatorio.tratamento || null,
-                    serverRelatorio.tipo_subs || null,
-                    serverRelatorio.temp_ambiente || null,
-                    serverRelatorio.ura || null,
-                    serverRelatorio.po || null,
-                    serverRelatorio.temp_super || null,
-                    serverRelatorio.intemperismo || null,
-                    serverRelatorio.descontaminacao || null,
-                    serverRelatorio.poeira_tam || null,
-                    serverRelatorio.poeira_quant || null,
-                    serverRelatorio.teor_sais || null,
-                    serverRelatorio.ambiente_pintura || null,
-                    serverRelatorio.rugosidade || null,
-                    serverRelatorio.laudo ? 1 : 0,
-                    serverRelatorio.rnc_n ? 1 : 0,
-                    serverRelatorio.obs_inst || null,
-                    serverRelatorio.obs_final || null,
-                    serverRelatorio.aprovado ? 1 : 0,
-                    serverRelatorio.m2 || null,
-                    serverRelatorio.checklist_n || null,
-                    'synced',
-                    serverRelatorio.id,
-                ]
+        for (const srv of vindosDoServidor) {
+            // Inserir Relatório Pai
+            await db.runAsync(
+                `INSERT INTO relatorios (id, cliente, data, sync_status, server_id) VALUES (?, ?, ?, ?, ?)`,
+                [srv.id, srv.cliente, srv.data, 'synced', srv.id]
             );
 
-            const relatorioId = result.lastInsertRowId || serverRelatorio.id;
-
-            for (const etapa of serverRelatorio.relatorios || []) {
+            // AQUI ESTÁ O PULO DO GATO:
+            // O Serializer chama de 'relatorios' as ETAPAS.
+            const listaEtapas = srv.relatorios || []; // Se vier undefined, vira array vazio
+            for (const etapa of listaEtapas) {
                 await db.runAsync(
-                    `INSERT INTO etapas_pintura (
-                        relatorio_id, tinta, lote_a, val_a, lote_b, val_b, lote_c, val_c,
-                        cor_munsell, temp_amb, ura, po, temp_substrato, diluente, met_aplic,
-                        inicio, termino, inter_repintura, epe, eps, insp_visual, aderencia,
-                        holiday, laudo, data_insp, pintor, sync_status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        relatorioId,
-                        etapa.tinta || null,
-                        etapa.lote_a || null,
-                        etapa.val_a || null,
-                        etapa.lote_b || null,
-                        etapa.val_b || null,
-                        etapa.lote_c || null,
-                        etapa.val_c || null,
-                        etapa.cor_munsell || null,
-                        etapa.temp_amb || null,
-                        etapa.ura || null,
-                        etapa.po || null,
-                        etapa.temp_substrato || null,
-                        etapa.diluente || null,
-                        etapa.met_aplic || null,
-                        etapa.inicio || null,
-                        etapa.termino || null,
-                        etapa.inter_repintura || null,
-                        etapa.epe || null,
-                        etapa.eps || null,
-                        etapa.insp_visual || null,
-                        etapa.aderencia || null,
-                        etapa.holiday || null,
-                        etapa.laudo || null,
-                        etapa.data_insp || null,
-                        etapa.pintor || null,
-                        'synced'
-                    ]
+                    `INSERT INTO etapas_pintura (relatorio_id, tinta, sync_status) VALUES (?, ?, ?)`,
+                    [srv.id, etapa.tinta, 'synced']
                 );
             }
 
-            for (const foto of serverRelatorio.relatorio || []) {
+            // O Serializer chama de 'relatorio' as FOTOS.
+            const listaFotos = srv.relatorio || []; 
+            for (const foto of listaFotos) {
                 await db.runAsync(
                     `INSERT INTO photos (relatorio_id, photo_path, sync_status) VALUES (?, ?, ?)`,
-                    [relatorioId, foto.photo, 'synced']
+                    [srv.id, foto.photo, 'synced']
                 );
             }
         }
+        
     } catch (error) {
-        console.error('Erro ao sincronizar relatórios:', error.message);
+        console.error('Erro geral no Sync:', error.message);
     }
 }
 

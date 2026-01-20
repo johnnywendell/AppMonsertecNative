@@ -1,10 +1,18 @@
 import { api } from './api';
 import NetInfo from '@react-native-community/netinfo';
 
-export const listarApontamentos = async () => {
+export const listarApontamentos = async (page = 1, search = "") => {
   try {
-    const { data } = await api.get('api/v1/efetivo/apontamentos');
-    return data;
+    // Adicionamos page e search na URL
+    const url = `api/v1/efetivo/apontamentos/?page=${page}&search=${search}`;
+    const { data } = await api.get(url);
+    
+    // IMPORTANTE: Retornamos os resultados e o total para controle da paginação
+    return {
+      results: data.results, // Os 20 itens
+      count: data.count,     // Total no banco
+      next: data.next        // Próxima página
+    };
   } catch (error) {
     console.error('Erro ao listar apontamentos:', error);
     throw error;
@@ -87,30 +95,21 @@ export const atualizarApontamento = async (apontamento, efetivos) => {
 
 export const buscarUltimoApontamentoCompleto = async () => {
   try {
-    // Busca todos os apontamentos
-    const apontamentos = await listarApontamentos();
+    // 1. Chamamos a listagem passando o parâmetro de ordenação do Django (?ordering=-data,-id)
+    // Isso já traz o mais recente no topo da lista
+    const response = await listarApontamentos(1, "", "-data,-id");
     
-    if (!apontamentos || apontamentos.length === 0) {
+    // 2. Extraímos a lista de dentro de .results (devido à paginação)
+    const lista = response?.results || (Array.isArray(response) ? response : []);
+
+    if (lista.length === 0) {
       return null;
     }
 
-    // Ordena por data (mais recente primeiro) e por ID (caso as datas sejam iguais)
-    apontamentos.sort((a, b) => {
-      const dateA = new Date(a.data);
-      const dateB = new Date(b.data);
-      
-      if (dateB.getTime() !== dateA.getTime()) {
-        return dateB.getTime() - dateA.getTime();
-      }
-      
-      // Se as datas forem iguais, ordena pelo ID mais recente
-      return b.id - a.id;
-    });
+    // 3. O primeiro item já é o mais recente graças ao "ordering" da API
+    const ultimoApontamento = lista[0];
 
-    // Pega o apontamento mais recente
-    const ultimoApontamento = apontamentos[0];
-
-    // Busca os detalhes completos do apontamento
+    // 4. Busca os detalhes completos (efetivos/colaboradores) desse ID
     const apontamentoCompleto = await buscarApontamentoPorId(ultimoApontamento.id);
     
     return apontamentoCompleto;

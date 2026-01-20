@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useMemo, useRef } from 'react';
-import { Text, StyleSheet, ScrollView, TouchableOpacity, View, RefreshControl } from 'react-native';
+import { Text, StyleSheet, ScrollView, TouchableOpacity, View, RefreshControl, ActivityIndicator } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { listarApontamentos, fetchColaboradores } from '../services/apontamentosService';
 
-const ApontamentosCards = React.memo(() => {
+// Adicionei a prop "filtro" para receber a busca da tela pai
+const ApontamentosCards = React.memo(({ filtro = "" }) => {
     const navigation = useNavigation();
     const [apontamentos, setApontamentos] = useState([]);
     const [colaboradores, setColaboradores] = useState([]);
@@ -19,22 +20,27 @@ const ApontamentosCards = React.memo(() => {
             if (isRefresh) setRefreshing(true);
             else setLoading(true);
 
-            const [apontData, colabData] = await Promise.all([
-                listarApontamentos(),
+            // Passamos o filtro (termo de busca) para o service
+            const [apontRes, colabData] = await Promise.all([
+                listarApontamentos(1, filtro), 
                 fetchColaboradores(),
             ]);
-            setApontamentos(apontData || []);
+
+            // CORREÇÃO AQUI: Acessamos o .results se existir (paginação)
+            // Caso contrário, tenta usar o dado direto (retrocompatibilidade)
+            const listaApontamentos = apontRes?.results || (Array.isArray(apontRes) ? apontRes : []);
+            
+            setApontamentos(listaApontamentos);
             setColaboradores(colabData || []);
         } catch (error) {
             console.error('Erro ao carregar dados:', error);
             setApontamentos([]);
-            setColaboradores([]);
         } finally {
             isLoadingRef.current = false;
             setLoading(false);
             setRefreshing(false);
         }
-    }, []);
+    }, [filtro]); // Recarrega quando o filtro mudar
 
     const onRefresh = useCallback(() => {
         loadData(true);
@@ -43,13 +49,14 @@ const ApontamentosCards = React.memo(() => {
     useFocusEffect(
         useCallback(() => {
             loadData();
-            return () => {};
         }, [loadData])
     );
 
+    // Otimização: Memoizar a função de busca de nome para não re-processar em cada render
     const getColaboradorName = useCallback(
         (colaboradorId) => {
-            const colaborador = colaboradores.find((col) => col.id === colaboradorId);
+            if (!colaboradores.length) return 'Carregando...';
+            const colaborador = colaboradores.find((col) => String(col.id) === String(colaboradorId));
             return colaborador ? colaborador.nome : 'Desconhecido';
         },
         [colaboradores]
@@ -59,15 +66,16 @@ const ApontamentosCards = React.memo(() => {
         if (loading && apontamentos.length === 0) {
             return (
                 <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#00315c" />
                     <Text style={styles.loadingText}>Carregando apontamentos...</Text>
                 </View>
             );
         }
 
-        if (!loading && apontamentos.length === 0) {
+        if (apontamentos.length === 0) {
             return (
                 <Text style={styles.noDataText}>
-                    Nenhum apontamento encontrado. Clique no botão "+" para adicionar um novo.
+                    {filtro ? 'Nenhum resultado para esta busca.' : 'Nenhum apontamento encontrado.'}
                 </Text>
             );
         }
@@ -82,45 +90,46 @@ const ApontamentosCards = React.memo(() => {
                     })}
                 activeOpacity={0.7}
             >
-                <View>
+                <View style={styles.headerRow}>
                     <Text style={styles.reportNumber}>#{String(item.id).padStart(4, '0')}/{item.data?.split('-')[0]}</Text>
+                    {/* Exibe o nome da área se o serializer trouxer, senão exibe o ID */}
+            
                 </View>
+
                 <View style={styles.cardRow}>
                     <Text style={styles.label}>Data:</Text>
                     <Text style={styles.value}>{item.data || '-'}</Text>
                 </View>
                 <View style={styles.cardRow}>
                     <Text style={styles.label}>Projeto:</Text>
-                    <Text style={styles.value}>{item.projeto_cod || '-'}</Text>
+                    <Text style={styles.value}>{item.projeto_nome || item.projeto_cod || '-'}</Text>
                 </View>
                 <View style={styles.cardRow}>
                     <Text style={styles.label}>Disciplina:</Text>
                     <Text style={styles.value}>{item.disciplina || '-'}</Text>
                 </View>
-                <View style={styles.cardRow}>
-                    <Text style={styles.label}>Área:</Text>
-                    <Text style={styles.value}>{item.area || '-'}</Text>
-                </View>
-                <View style={styles.cardRow}>
-                    <Text style={styles.label}>Observação:</Text>
-                    <Text style={styles.value}>{item.obs || '-'}</Text>
-                </View>
-                <Text style={styles.label}>Colaboradores:</Text>
+                
+                <View style={styles.divider} />
+
+                <Text style={[styles.label, { marginBottom: 5 }]}>Efetivo ({item.apontamentos?.length || 0}):</Text>
                 {item.apontamentos && item.apontamentos.length > 0 ? (
-                    item.apontamentos.map((efetivo, index) => (
+                    item.apontamentos.slice(0, 5).map((efetivo, index) => (
                         <View key={`efetivo-${index}`} style={styles.efetivoContainer}>
-                            <Text style={styles.efetivoText}>
-                                {getColaboradorName(efetivo.colaborador)} - {efetivo.status}
-                                {efetivo.lider === '1' ? ' (Líder)' : ''}
+                            <Text style={styles.efetivoText} numberOfLines={1}>
+                                • {getColaboradorName(efetivo.colaborador)} - {efetivo.status}
+                                {efetivo.lider === '1' || efetivo.lider === 1 ? ' ⭐' : ''}
                             </Text>
                         </View>
                     ))
                 ) : (
                     <Text style={styles.noEfetivoText}>Nenhum colaborador registrado</Text>
                 )}
+                {item.apontamentos?.length > 5 && (
+                    <Text style={styles.maisItens}>+ {item.apontamentos.length - 5} colaboradores...</Text>
+                )}
             </TouchableOpacity>
         ));
-    }, [apontamentos, loading, navigation, getColaboradorName]);
+    }, [apontamentos, loading, navigation, getColaboradorName, filtro]);
 
     return (
         <ScrollView
@@ -139,9 +148,40 @@ const ApontamentosCards = React.memo(() => {
     );
 });
 
-ApontamentosCards.displayName = 'ApontamentosCards';
-
+// Estilos adicionais para melhorar o visual
 const styles = StyleSheet.create({
+    // ... seus estilos anteriores ...
+    headerRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        borderBottomWidth: 1,
+        borderBottomColor: '#eee',
+        marginBottom: 10,
+        paddingBottom: 5
+    },
+    areaBadge: {
+        backgroundColor: '#e6f0fa',
+        color: '#00315c',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 4,
+        fontSize: 12,
+        fontWeight: 'bold'
+    },
+    divider: {
+        height: 1,
+        backgroundColor: '#eee',
+        marginVertical: 10
+    },
+    maisItens: {
+        fontSize: 12,
+        color: '#888',
+        fontStyle: 'italic',
+        marginLeft: 10,
+        marginTop: 2
+    },
+    // Mantendo e ajustando os que você já tinha:
     container: { padding: 10, flexGrow: 1 },
     card: {
         backgroundColor: 'white',
@@ -151,61 +191,16 @@ const styles = StyleSheet.create({
         elevation: 3,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
+        shadowOpacity: 0.1,
         shadowRadius: 3.84,
     },
-    cardRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginBottom: 8,
-    },
-    label: {
-        fontWeight: 'bold',
-        color: '#555',
-        flex: 1,
-    },
-    value: {
-        fontSize: 16,
-        color: '#333',
-        flex: 2,
-        textAlign: 'right',
-    },
-    efetivoContainer: {
-        marginLeft: 10,
-        marginTop: 4,
-    },
-    efetivoText: {
-        fontSize: 14,
-        color: '#444',
-    },
-    noEfetivoText: {
-        fontSize: 14,
-        color: '#666',
-        marginLeft: 10,
-        marginTop: 4,
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginTop: 50,
-    },
-    loadingText: {
-        fontSize: 16,
-        color: '#666',
-    },
-    noDataText: {
-        textAlign: 'center',
-        marginTop: 50,
-        fontSize: 16,
-        color: '#666',
-    },
-    reportNumber: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        marginBottom: 10,
-        color: '#00315c',
-    },
+    cardRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+    label: { fontWeight: 'bold', color: '#555', fontSize: 13 },
+    value: { fontSize: 14, color: '#333' },
+    efetivoText: { fontSize: 13, color: '#444' },
+    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 100 },
+    noDataText: { textAlign: 'center', marginTop: 100, fontSize: 15, color: '#999', paddingHorizontal: 40 },
+    reportNumber: { fontSize: 16, fontWeight: 'bold', color: '#00315c' },
 });
 
 export default ApontamentosCards;

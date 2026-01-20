@@ -1,5 +1,21 @@
 import { getDb, runAsync, getAllAsync, getFirstAsync } from '../database';
 import { syncAS } from './syncService'; // Importa a função de sync
+import { api } from './api'; // Com chaves
+
+async function runBatchAsync(db, statements) {
+    // Esta é uma implementação simplificada; em um banco de dados Expo SQLite, 
+    // você usaria db.transactionAsync.
+    console.log(`⏳ Executando lote de ${statements.length} comandos SQL...`);
+    for (const stmt of statements) {
+        try {
+            await db.runAsync(stmt.sql, stmt.args);
+        } catch (e) {
+            console.error("❌ Erro ao executar statement em lote:", stmt.sql, stmt.args, e.message);
+            // Dependendo da sua necessidade, você pode lançar o erro para reverter a transação inteira
+        }
+    }
+    console.log("✅ Lote de comandos SQL concluído.");
+}
 
 const TABLE_NAME = 'ass'; // Mantendo 'ass' para evitar conflito com 'AS' do SQL
 
@@ -77,20 +93,80 @@ export const salvarASLocal = async (dados) => {
 /**
  * Lista todas as ASs (Offline-First) e dispara sync em background.
  */
-export const listarASs = async () => {
+const AS_ENDPOINT = 'api/v1/planejamento/as/'; // Ajuste conforme seu endpoint real
+
+export const buscarASsNaAPI = async (termo) => {
     try {
-        // 1. Leitura local
-        const lista = await getAllAsync(
-            "SELECT * FROM ass ORDER BY data DESC, id DESC" // Ordena por data (mais recente primeiro)
-        );
+        const response = await api.get(`${AS_ENDPOINT}?search=${termo}`);
+        const resultados = response.data.results || [];
 
-        // 2. Sincronização em background
-        syncAS().catch((e) => console.warn("Sync de ASs em background falhou:", e.message));
+        if (resultados.length > 0) {
+            const db = await getDb();
+            const statements = [];
 
-        return lista;
+            for (const item of resultados) {
+                statements.push({
+                    sql: `INSERT OR REPLACE INTO ass (
+                        server_id, data, local, disciplina, obs, tipo,
+                        unidade_server_id, projeto_cod_server_id, 
+                        solicitante_server_id, aprovador_server_id,
+                        sync_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`,
+                    args: [
+                        item.id, 
+                        item.data, 
+                        item.local || "", 
+                        item.disciplina || "", 
+                        item.obs || "",
+                        item.tipo || "NORMAL", // ADICIONADO: Evita erro de NOT NULL constraint
+                        item.unidade?.id || item.unidade || null,
+                        item.projeto_cod?.id || item.projeto_cod || null,
+                        item.solicitante?.id || item.solicitante || null,
+                        item.aprovador?.id || item.aprovador || null,
+                    ]
+                });
+            }
+            await runBatchAsync(db, statements);
+        }
+        return resultados.length;
+    } catch (error) {
+        console.error("❌ Erro na busca remota de AS:", error.message);
+        return 0;
+    }
+};
+
+export const listarASs = async (page = 1, limit = 15, busca = "") => {
+    try {
+        const db = await getDb();
+
+        if (page === 1 && !busca) {
+            await syncAS(db).catch(err => console.error("Falha no sync AS:", err));
+        }
+
+        const offset = (page - 1) * limit;
+        let query = `SELECT * FROM ass `;
+        let args = [];
+
+        if (busca) {
+            // REMOVIDO DEFINITIVAMENTE: "OR os LIKE ?"
+            // Agora busca em local, disciplina ou ID
+            query += `WHERE local LIKE ? OR disciplina LIKE ? OR CAST(server_id AS TEXT) LIKE ? `;
+            args.push(`%${busca}%`, `%${busca}%`, `%${busca}%`);
+        }
+
+        query += `ORDER BY data DESC, id DESC LIMIT ? OFFSET ?`;
+        args.push(parseInt(limit), parseInt(offset));
+
+        const listaRaw = await db.getAllAsync(query, args);
+        
+        return listaRaw.map(item => ({
+            ...item,
+            unidade: item.unidade_server_id,
+            projeto_cod: item.projeto_cod_server_id,
+        }));
 
     } catch (error) {
-        console.error("Erro ao listar ASs localmente:", error);
+        console.error("❌ Erro CRÍTICO ao listar ASs:", error);
         throw error;
     }
 };

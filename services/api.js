@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { getStoredTokens, refreshAccessToken, clearTokens } from './authService';
 
-export const BASE_URL = 'https://scaip.app.br/';
+export const BASE_URL = 'https://hml.scaip.app.br/';
 
 export const api = axios.create({
   baseURL: BASE_URL,

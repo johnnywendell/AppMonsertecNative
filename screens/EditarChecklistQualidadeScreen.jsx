@@ -81,8 +81,8 @@ const getImageUrl = (url) => {
 
     const isAbsolute = /^https?:\/\//i.test(actualUri);
     // Hosts que devem ser tratados como caminho relativo, mesmo sendo absolutos
-    const sameHost = isAbsolute && actualUri.includes('scaip.app.br');
-    const isDevHost = isAbsolute && actualUri.includes('scaip.app.br'); // <--- 🚨 ADICIONAR CONDIÇÃO DO IP LOCAL
+    const sameHost = isAbsolute && actualUri.includes(BASE_URL);
+    const isDevHost = isAbsolute && actualUri.includes(BASE_URL); // <--- 🚨 ADICIONAR CONDIÇÃO DO IP LOCAL
 
     // 1) Se for URL absoluta E não for nenhum dos hosts conhecidos → retorna direto
     if (isAbsolute && !sameHost && !isDevHost) {

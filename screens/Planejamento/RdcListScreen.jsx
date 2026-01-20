@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { listarRDCs } from '../../services/rdcService'; // Importa o service de RDC
+import { listarRDCs, buscarRDCsNaAPI } from '../../services/rdcService'; 
 import { MaterialIcons } from '@expo/vector-icons';
-// Adicionamos parseISO aqui para garantir a correta interpretação da string de data
 import { format, parseISO } from 'date-fns'; 
 import { ptBR } from 'date-fns/locale';
 
@@ -12,88 +11,111 @@ export default function RdcListScreen() {
     const [rdcs, setRdcs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    
+    // --- ESTADOS PARA BUSCA E PAGINAÇÃO ---
+    const [searchText, setSearchText] = useState(""); // Novo estado para busca
+    const [page, setPage] = useState(1);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [hasMore, setHasMore] = useState(true);
+    const PAGE_SIZE = 15;
 
-    // Função para formatar o ID local em um número sequencial (Ex: 00001)
-    // O seu pedido (ID 92 -> RDC 00092) já é atendido por esta função.
-    const formatRdcNumber = (id) => {
-        // Garantindo que 'id' seja um número antes de formatar
-        const numericId = Number(id);
-        return String(numericId).padStart(5, '0');
-    };
-
-    // Função para buscar os dados e atualizar a lista
-    const fetchRdcs = async () => {
+    const fetchRdcs = async (pageNum = 1, shouldRefresh = false) => {
+        if (pageNum > 1) setLoadingMore(true);
+        
         try {
-            // O listarRDCs já lida com a desserialização e sincronização em background
-            const data = await listarRDCs();
-            setRdcs(data);
+            // Se tem texto de busca e é a primeira página, força o download da API
+            if (searchText.length > 0 && pageNum === 1) {
+                console.log("🔍 Buscando na API por:", searchText);
+                await buscarRDCsNaAPI(searchText); 
+            }
+
+            // Agora busca no SQLite (que já contém o que veio da API + o que já estava lá)
+            const data = await listarRDCs(pageNum, PAGE_SIZE, searchText);
+            
+            console.log(`📊 SQLite retornou ${data.length} itens para a busca.`);
+
+            if (data.length < PAGE_SIZE) {
+                setHasMore(false);
+            } else {
+                setHasMore(true);
+            }
+
+            if (shouldRefresh || pageNum === 1) {
+                setRdcs(data);
+            } else {
+                setRdcs(prev => [...prev, ...data]);
+            }
         } catch (error) {
             console.error('Erro ao buscar lista de RDCs:', error);
-            // Mensagem de erro para o usuário (em um MessageModal, por exemplo)
         } finally {
             setLoading(false);
+            setLoadingMore(false);
             setIsRefreshing(false);
         }
     };
 
-    // Use useFocusEffect para recarregar a lista sempre que a tela for focada
+    // Efeito para disparar a busca quando o usuário digita (Debounce simples)
     useFocusEffect(
-        React.useCallback(() => {
-            setLoading(true);
-            fetchRdcs();
-        }, [])
+        useCallback(() => {
+            if (searchText === "") {
+                setPage(1);
+                fetchRdcs(1, true);
+            }
+        }, []) // Removido searchText daqui para não entrar em loop
     );
+
+    // 2. Debounce apenas para quando o usuário digita
+    useEffect(() => {
+        // Se o campo estiver vazio, não faz nada (o FocusEffect acima cuida disso)
+        if (searchText === "") return;
+
+        const delayDebounce = setTimeout(() => {
+            setPage(1);
+            fetchRdcs(1, true);
+        }, 800); // Aumentei um pouco para dar mais tempo ao usuário
+
+        return () => clearTimeout(delayDebounce);
+    }, [searchText]);
 
     const handleRefresh = () => {
         setIsRefreshing(true);
-        fetchRdcs();
+        setPage(1);
+        fetchRdcs(1, true);
     };
 
-    const handleEdit = (id) => {
-        // Navega para a tela de formulário com o ID para edição
-        // Supondo que o nome da tela de formulário seja 'RdcForm'
-        navigation.navigate('RdcForm', { id: id });
+    const handleLoadMore = () => {
+        if (!loadingMore && hasMore) {
+            const nextPage = page + 1;
+            setPage(nextPage);
+            fetchRdcs(nextPage);
+        }
     };
 
-    const handleCreate = () => {
-        // Navega para a tela de formulário sem ID para criação
-        navigation.navigate('RdcForm');
+    // --- RENDERIZAÇÃO ---
+    const renderFooter = () => {
+        if (!loadingMore) return null;
+        return (
+            <View style={styles.loadingMore}>
+                <ActivityIndicator size="small" color="#00315c" />
+            </View>
+        );
     };
 
     const renderItem = ({ item }) => {
-        const syncColor = item.sync_status === 'pending' ? '#ffc107' : '#28a745'; // Amarelo ou Verde
-        
-        let rdcData = 'S/ Data';
-
-        // CORREÇÃO APLICADA AQUI: Usando parseISO para interpretar a string de data
-        // antes de formatar. Isso previne o erro de fuso horário que causa o recuo de um dia.
-        if (item.data) {
-            try {
-                // parseISO converte a string ISO (e.g., "2025-12-02") para um objeto Date
-                const dateObj = parseISO(item.data); 
-                rdcData = format(dateObj, 'dd/MM/yyyy', { locale: ptBR });
-            } catch (e) {
-                console.error("Erro ao formatar data:", item.data, e);
-                rdcData = 'Erro Data';
-            }
-        }
+        const syncColor = item.sync_status === 'pending' ? '#ffc107' : '#28a745';
+        let rdcData = item.data ? format(parseISO(item.data), 'dd/MM/yyyy', { locale: ptBR }) : 'S/ Data';
 
         return (
             <TouchableOpacity 
                 style={[styles.itemContainer, { borderLeftColor: syncColor }]} 
-                onPress={() => handleEdit(item.id)}
+                onPress={() => navigation.navigate('RdcForm', { id: item.id })}
                 activeOpacity={0.8}
             >
                 <View style={styles.textContainer}>
-                    {/* CONFIRMAÇÃO DO NÚMERO DO RDC: id 92 -> 00092 */}
-                    <Text style={styles.rdcTitle}>RDC N° {formatRdcNumber(item.server_id)}</Text> 
-                    <Text style={styles.detailText}>Data: {rdcData}</Text>
-                    <Text style={styles.detailText}>Local: {item.local || 'Não informado'}</Text>
-                    
-                    {/* Exibe o status de sync */}
+                    <Text style={styles.rdcTitle}>RDC N° {String(item.server_id || item.id).padStart(5, '0')}</Text> 
+                    <Text style={styles.detailText}>Data: {rdcData} | Local: {item.local}</Text>
                     <Text style={[styles.syncStatusText, { color: syncColor }]}>
                         {item.sync_status === 'pending' ? '🟡 Pendente' : '🟢 Sincronizado'}
-                        {item.server_id ? ` (ID Server: ${item.server_id})` : ''}
                     </Text>
                 </View>
                 <MaterialIcons name="chevron-right" size={30} color="#00315c" />
@@ -101,32 +123,36 @@ export default function RdcListScreen() {
         );
     };
 
-    if (loading && rdcs.length === 0) {
-        return <ActivityIndicator size="large" color="#00315c" style={styles.loading} />;
-    }
-
     return (
         <View style={styles.container}>
+            {/* BARRA DE PESQUISA */}
+            <View style={styles.searchContainer}>
+                <MaterialIcons name="search" size={24} color="#666" style={styles.searchIcon} />
+                <TextInput
+                    style={styles.searchInput}
+                    placeholder="Pesquisar por local ou disciplina..."
+                    value={searchText}
+                    onChangeText={setSearchText}
+                    clearButtonMode="while-editing"
+                />
+            </View>
+
             <FlatList
                 data={rdcs}
                 renderItem={renderItem}
                 keyExtractor={(item) => item.id.toString()}
                 contentContainerStyle={styles.listContent}
+                onEndReached={handleLoadMore}
+                onEndReachedThreshold={0.3}
+                ListFooterComponent={renderFooter}
                 refreshing={isRefreshing}
                 onRefresh={handleRefresh}
                 ListEmptyComponent={() => (
-                    !loading && (
-                        <Text style={styles.emptyText}>Nenhum RDC cadastrado. Crie um novo registro!</Text>
-                    )
+                    !loading && <Text style={styles.emptyText}>Nenhum RDC encontrado.</Text>
                 )}
             />
             
-            {/* Botão Flutuante para Adicionar */}
-            <TouchableOpacity 
-                style={styles.fab} 
-                onPress={handleCreate}
-                activeOpacity={0.8}
-            >
+            <TouchableOpacity style={styles.fab} onPress={() => navigation.navigate('RdcForm')}>
                 <MaterialIcons name="add" size={28} color="white" />
             </TouchableOpacity>
         </View>
@@ -134,73 +160,48 @@ export default function RdcListScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#f5f7fa',
-    },
-    loading: {
-        flex: 1,
-        justifyContent: 'center',
+    container: { flex: 1, backgroundColor: '#f5f5f5' },
+    searchContainer: {
+        flexDirection: 'row',
         alignItems: 'center',
+        backgroundColor: '#fff',
+        margin: 10,
+        paddingHorizontal: 10,
+        borderRadius: 8,
+        elevation: 2,
+        height: 45
     },
-    listContent: {
-        padding: 10,
-    },
+    searchIcon: { marginRight: 8 },
+    searchInput: { flex: 1, fontSize: 16 },
+    listContent: { paddingBottom: 80 },
     itemContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
         backgroundColor: '#fff',
+        marginHorizontal: 10,
+        marginVertical: 5,
         padding: 15,
-        borderRadius: 8,
-        marginBottom: 8,
+        borderRadius: 5,
         borderLeftWidth: 5,
-        // borderLeftColor é definido dinamicamente (syncColor)
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-        elevation: 3,
+        elevation: 1
     },
-    textContainer: {
-        flex: 1,
-        marginRight: 10,
-    },
-    rdcTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#00315c',
-        marginBottom: 5,
-    },
-    detailText: {
-        fontSize: 14,
-        color: '#666',
-    },
-    syncStatusText: {
-        fontSize: 12,
-        fontWeight: '500',
-        marginTop: 4,
-    },
-    emptyText: {
-        textAlign: 'center',
-        marginTop: 50,
-        fontSize: 16,
-        color: '#666',
-    },
+    textContainer: { flex: 1 },
+    rdcTitle: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+    detailText: { fontSize: 14, color: '#666', marginTop: 2 },
+    syncStatusText: { fontSize: 12, fontWeight: 'bold', marginTop: 5 },
     fab: {
         position: 'absolute',
-        width: 60,
-        height: 60,
-        alignItems: 'center',
-        justifyContent: 'center',
         right: 20,
         bottom: 20,
         backgroundColor: '#00315c',
-        borderRadius: 30,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 6,
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 5
     },
+    loading: { flex: 1, justifyContent: 'center' },
+    loadingMore: { paddingVertical: 20 },
+    emptyText: { textAlign: 'center', marginTop: 50, color: '#999' }
 });

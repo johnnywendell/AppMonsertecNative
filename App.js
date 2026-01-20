@@ -39,7 +39,7 @@ export default function App() {
                 // >>> CHAMADA TEMPORÁRIA PARA RESETAR O BANCO <<<
                 // REMOVA OU COMENTE ESTA LINHA APÓS O AJUSTE NA TABELA COLABORADORES
                 //console.warn('!!! AVISO: BANCO DE DADOS SERÁ RESETADO (PERDA TOTAL DE DADOS) !!!');
-                //await resetDatabase();
+                await resetDatabase();
                 // >>> FIM DA CHAMADA TEMPORÁRIA <<<
                 
                 await setupDatabase();

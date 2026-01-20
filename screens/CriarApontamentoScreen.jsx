@@ -47,40 +47,45 @@ export default function CriarApontamentoScreen() {
     ];
 
     const preencherComUltimoApontamento = async () => {
-        try {
-            const ultimo = await buscarUltimoApontamentoCompleto();
+    try {
+        // O service agora já retorna o objeto do apontamento (ou null)
+        const ultimo = await buscarUltimoApontamentoCompleto();
 
-            if (!ultimo) {
-                setModalMessage('Nenhum apontamento anterior encontrado.');
-                setModalVisible(true);
-                return;
-            }
+        // LOG DE DEBUG: Se continuar dando erro, veja o que aparece no console
+        console.log("Dados do último apontamento recebidos:", ultimo);
 
-            // Preenche os campos com os dados do último apontamento
-            setData(new Date(ultimo.data));
-            setArea(String(ultimo.area));
-            setDisciplina(ultimo.disciplina);
-            setProjeto(String(ultimo.projeto));
-            setObservacoes(ultimo.observacoes || '');
-
-            // Preenche os efetivos
-            if (ultimo.apontamentos && ultimo.apontamentos.length > 0) {
-                setEfetivos(
-                    ultimo.apontamentos.map((e) => ({
-                        colaborador: String(e.colaborador),
-                        status: e.status,
-                        lider: String(e.lider),
-                    }))
-                );
-            }
-
-            setModalMessage('Campos preenchidos com o último apontamento!');
+        if (!ultimo) {
+            setModalMessage('Nenhum apontamento anterior encontrado.');
             setModalVisible(true);
-        } catch (error) {
-            setModalMessage('Erro ao buscar último apontamento: ' + error.message);
-            setModalVisible(true);
+            return;
         }
-    };
+
+        // Preenche os campos principais
+        // Usamos IDs vindos da API. Verifique se os nomes batem com o seu Serializer do Django
+        setArea(String(ultimo.area?.id || ultimo.area || '')); 
+        setDisciplina(ultimo.disciplina || '');
+        setProjeto(String(ultimo.projeto_cod?.id || ultimo.projeto_cod || ''));
+        setObservacoes(ultimo.obs || '');
+
+        // Preenche os efetivos (colaboradores)
+        if (ultimo.apontamentos && Array.isArray(ultimo.apontamentos)) {
+            setEfetivos(
+                ultimo.apontamentos.map((e) => ({
+                    colaborador: String(e.colaborador?.id || e.colaborador),
+                    status: e.status || 'PRESENTE',
+                    lider: String(e.lider || '0'),
+                }))
+            );
+        }
+
+        setModalMessage('Campos preenchidos com o último apontamento!');
+        setModalVisible(true);
+    } catch (error) {
+        console.error('Erro detalhado:', error);
+        setModalMessage('Erro ao buscar último apontamento: ' + error.message);
+        setModalVisible(true);
+    }
+};
 
 
     useEffect(() => {
@@ -88,14 +93,17 @@ export default function CriarApontamentoScreen() {
             const netInfo = await NetInfo.fetch();
             setIsOnline(netInfo.isConnected);
             try {
-                const [fetchedAreas, fetchedProjetos, fetchedColaboradores] = await Promise.all([
+                const [resAreas, resProjetos, resColaboradores] = await Promise.all([
                     fetchAreas(),
                     fetchProjetos(),
                     fetchColaboradores(),
                 ]);
-                setAreas(fetchedAreas || []);
-                setProjetos(fetchedProjetos || []);
-                setColaboradores(fetchedColaboradores || []);
+
+                // Se a API retornar objeto com results, usa .results, senão usa o array direto
+                setAreas(resAreas?.results || (Array.isArray(resAreas) ? resAreas : []));
+                setProjetos(resProjetos?.results || (Array.isArray(resProjetos) ? resProjetos : []));
+                setColaboradores(resColaboradores?.results || (Array.isArray(resColaboradores) ? resColaboradores : []));
+                
             } catch (error) {
                 console.error('Erro ao carregar dados iniciais:', error);
                 setModalMessage('Erro ao carregar dados. Tente novamente.');

@@ -50,14 +50,22 @@ export const fetchUnidades = async () => {
 export const fetchASOptions = async () => {
     try {
         const { data } = await api.get('api/v1/planejamento/as/');
-        // Exemplo: Se o campo do AS for 'numero'
-        return data.map(item => ({ 
-            label: item.numero || `AS #${item.id}`, // Ajuste para o nome real do campo
+
+        // 1. Pega os resultados de dentro de 'results' (padrão do Django paginado)
+        // Se 'data.results' não existir, tenta usar o próprio 'data' (caso a API mude)
+        // Se nenhum existir, usa um array vazio []
+        const listaAS = data.results || data || [];
+
+        // 2. Agora o .map vai funcionar porque 'listaAS' é um array
+        return listaAS.map(item => ({ 
+            // Verifique se o campo no seu Django é 'numero', 'numero_as' ou 'codigo'
+            label: item.numero || item.codigo || `AS #${item.id}`, 
             value: item.id 
         }));
+
     } catch (error) {
         console.error('Erro ao buscar AS:', error);
-        return [];
+        return []; // Retorna vazio para o Picker não travar a tela
     }
 };
 
