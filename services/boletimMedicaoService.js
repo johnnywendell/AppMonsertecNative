@@ -1,5 +1,21 @@
 import { getDb, runAsync, getAllAsync, getFirstAsync } from '../database';
 import { syncBoletimMedicao } from './syncService'; // Importa a função de sync
+import { api } from './api'; // Com chaves
+
+async function runBatchAsync(db, statements) {
+    // Esta é uma implementação simplificada; em um banco de dados Expo SQLite, 
+    // você usaria db.transactionAsync.
+    console.log(`⏳ Executando lote de ${statements.length} comandos SQL...`);
+    for (const stmt of statements) {
+        try {
+            await db.runAsync(stmt.sql, stmt.args);
+        } catch (e) {
+            console.error("❌ Erro ao executar statement em lote:", stmt.sql, stmt.args, e.message);
+            // Dependendo da sua necessidade, você pode lançar o erro para reverter a transação inteira
+        }
+    }
+    console.log("✅ Lote de comandos SQL concluído.");
+}
 
 const TABLE_NAME = 'boletim_medicoes';
 
@@ -80,23 +96,97 @@ export const salvarBoletimMedicaoLocal = async (dados) => {
 };
 
 // --- FUNÇÃO 2: LISTAR BMs ---
-/**
- * Lista todos os Boletins de Medição (Offline-First) e dispara sync em background.
- */
-export const listarBoletinsMedicao = async () => {
+
+const BM_ENDPOINT = 'api/v1/planejamento/boletimmedicao/';
+
+// --- 1. BUSCAR NA API (Remoto -> SQLite) ---
+export const buscarBoletinsNaAPI = async (termo) => {
     try {
-        // 1. Leitura local
-        const lista = await getAllAsync(
-            "SELECT * FROM boletim_medicoes ORDER BY periodo_inicio DESC, id DESC" // Ordena por data de início
-        );
+        const response = await api.get(`${BM_ENDPOINT}?search=${termo}`);
+        // DRF com paginação retorna .results
+        const resultados = response.data.results || [];
 
-        // 2. Sincronização em background
-        syncBoletimMedicao().catch((e) => console.warn("Sync de BMs em background falhou:", e.message));
+        if (resultados.length > 0) {
+            const db = await getDb();
+            const statements = [];
 
-        return lista;
+            for (const item of resultados) {
+                statements.push({
+                    sql: `INSERT OR REPLACE INTO boletim_medicoes (
+                        server_id, unidade_server_id, projeto_cod_server_id, 
+                        d_aprovador_server_id, b_aprovador_server_id,
+                        periodo_inicio, periodo_fim, status_pgt, status_med, 
+                        d_numero, d_data, d_status, b_numero, b_data, b_status,
+                        descricao, valor, follow_up, rev, sync_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`,
+                    args: [
+                        item.id,
+                        item.unidade?.id || item.unidade || null,
+                        item.projeto_cod?.id || item.projeto_cod || null,
+                        item.d_aprovador?.id || item.d_aprovador || null,
+                        item.b_aprovador?.id || item.b_aprovador || null,
+                        item.periodo_inicio,
+                        item.periodo_fim,
+                        item.status_pgt,
+                        item.status_med,
+                        item.d_numero,
+                        item.d_data,
+                        item.d_status,
+                        item.b_numero,
+                        item.b_data,
+                        item.b_status,
+                        item.descricao || "",
+                        item.valor || 0,
+                        item.follow_up || "",
+                        item.rev || 0,
+                    ]
+                });
+            }
+            // Executa todos os inserts de uma vez para performance
+            await runBatchAsync(db, statements);
+        }
+        return resultados.length;
+    } catch (error) {
+        console.error("❌ Erro na busca remota de BMs:", error.message);
+        return 0;
+    }
+};
+
+export const listarBoletinsMedicao = async (page = 1, limit = 15, busca = "") => {
+    try {
+        const db = await getDb();
+
+        // Se estiver na primeira página e sem busca, tenta sincronizar o básico
+        if (page === 1 && !busca) {
+            await syncBoletimMedicao(db).catch(err => console.error("Falha no sync BM:", err));
+        }
+
+        const offset = (page - 1) * limit;
+        let query = `SELECT * FROM boletim_medicoes `;
+        let args = [];
+
+        if (busca) {
+            // Busca por descrição, número do documento D ou B, ou ID do servidor
+            query += `WHERE descricao LIKE ? OR d_numero LIKE ? OR b_numero LIKE ? OR CAST(server_id AS TEXT) LIKE ? `;
+            args.push(`%${busca}%`, `%${busca}%`, `%${busca}%`, `%${busca}%`);
+        }
+
+        query += `ORDER BY periodo_inicio DESC, id DESC LIMIT ? OFFSET ?`;
+        args.push(parseInt(limit), parseInt(offset));
+
+        const listaRaw = await db.getAllAsync(query, args);
+        
+        // Mapeia os nomes dos campos para manter compatibilidade com a UI
+        return listaRaw.map(item => ({
+            ...item,
+            unidade: item.unidade_server_id,
+            projeto_cod: item.projeto_cod_server_id,
+            d_aprovador: item.d_aprovador_server_id,
+            b_aprovador: item.b_aprovador_server_id,
+        }));
 
     } catch (error) {
-        console.error("Erro ao listar BMs localmente:", error);
+        console.error("❌ Erro CRÍTICO ao listar BMs:", error);
         throw error;
     }
 };

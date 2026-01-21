@@ -189,7 +189,6 @@ export default function ASFormScreen({ route }) {
 
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-            <Text style={styles.title}>{isEditing ? `Editando AS (ID Local: ${id})` : 'Nova AS'}</Text>
             
             {/* Campo Data */}
             <Text style={styles.label}>Data *</Text>

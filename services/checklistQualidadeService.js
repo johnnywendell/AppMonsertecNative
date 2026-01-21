@@ -83,8 +83,7 @@ export const inserirChecklist = async (checklist) => {
     }
 };
 
-// --- Atualizar checklist ---
-// --- Atualizar checklist ---
+
 // --- Atualizar checklist ---
 export const atualizarChecklist = async (id, checklist) => {
     const netInfo = await NetInfo.fetch();
@@ -128,17 +127,21 @@ export const atualizarChecklist = async (id, checklist) => {
 
 
 // --- Listar checklists ---
-export const listarChecklists = async () => {
+export const listarChecklists = async (page = 1) => { // Adicionei suporte a passar a página
     const netInfo = await NetInfo.fetch();
 
     if (!netInfo.isConnected) {
-        console.error('Sem conexão de internet. Não é possível listar checklists.');
-        return [];
+        console.error('Sem conexão de internet.');
+        return { results: [], count: 0 }; // Retorno consistente
     }
 
     try {
-        const { data } = await api.get('api/v1/qualidade/checklists/');
-        return data;
+        // Passamos o parâmetro 'page' para a API
+        const { data } = await api.get(`api/v1/qualidade/checklists/?page=${page}`);
+        
+        // IMPORTANTE: Agora retornamos data.results para manter compatibilidade 
+        // ou o objeto todo se você precisar do 'count' para criar um scroll infinito.
+        return data.results || []; 
     } catch (error) {
         console.error('Erro ao listar checklists online:', error);
         return [];

@@ -941,27 +941,28 @@ export const syncAS = async (db) => {
     console.log("Log: 🔄 Sincronização de AS finalizada.");
 };
 
-const BM_ENDPOINT = 'api/v1/planejamento/boletimmedicao/'; // Ajuste o endpoint conforme sua API
-export async function syncBoletimMedicao() {
+const BM_ENDPOINT = 'api/v1/planejamento/boletimmedicao/';
+
+export async function syncBoletimMedicao(dbParam = null) {
     const { isConnected } = await NetInfo.fetch();
     if (!isConnected) {
         console.log('📵 Sem internet — BMs sem sync agora');
         return;
     }
 
-    const db = await getDb();
+    // Garante que temos a instância do banco
+    const db = dbParam || await getDb();
 
     try {
-        console.log("📌 Sincronizando BMs...");
+        console.log("📌 Iniciando Sincronização de BMs (UP & DOWN)...");
 
-        // 1️⃣ SYNC UP: Enviar pendentes do SQLite para API
+        // --- 1️⃣ SYNC UP: Enviar pendentes do SQLite para API ---
         const pendentes = await db.getAllAsync(
             "SELECT * FROM boletim_medicoes WHERE sync_status = 'pending' OR sync_status = 'update_pending'"
         );
 
         for (const bmLocal of pendentes) {
             try {
-                // Monta o Payload para o Django (usando server_id das FKs)
                 const payload = {
                     periodo_inicio: bmLocal.periodo_inicio,
                     periodo_fim: bmLocal.periodo_fim,
@@ -977,73 +978,76 @@ export async function syncBoletimMedicao() {
                     valor: bmLocal.valor,
                     follow_up: bmLocal.follow_up,
                     rev: bmLocal.rev,
-                    
-                    // Chaves Estrangeiras (Mapeamento direto para IDs do Servidor)
+                    // Foreign Keys
                     unidade_id: bmLocal.unidade_server_id,
-                    projeto_cod_id: bmLocal.projeto_cod_server_id,
-                    d_aprovador_id: bmLocal.d_aprovador_server_id,
-                    b_aprovador_id: bmLocal.b_aprovador_server_id,
+                    projeto_cod: bmLocal.projeto_cod_server_id,
+                    d_aprovador: bmLocal.d_aprovador_server_id,
+                    b_aprovador: bmLocal.b_aprovador_server_id,
                 };
 
                 let resp;
-                
                 if (bmLocal.server_id) {
-                    // Atualização (PUT)
                     resp = await api.put(`${BM_ENDPOINT}${bmLocal.server_id}/`, payload);
-                    console.log(`☑️ BM atualizado Server ID ${bmLocal.server_id}`);
                 } else {
-                    // Criação (POST)
                     resp = await api.post(BM_ENDPOINT, payload);
-                    console.log(`☑️ BM criado Server ID ${resp.data.id}`);
                 }
-                
-                // Atualiza o status local
+
                 await db.runAsync(
                     "UPDATE boletim_medicoes SET sync_status = 'synced', server_id = ? WHERE id = ?",
                     [resp.data.id, bmLocal.id]
                 );
+                console.log(`✅ BM ID Local ${bmLocal.id} sincronizado.`);
 
             } catch (e) {
-                console.warn(`⚠️ Falha ao enviar BM pendente ID ${bmLocal.id}:`, e.message);
+                console.warn(`⚠️ Falha ao enviar BM ID ${bmLocal.id}:`, e.response?.data || e.message);
             }
         }
 
-        // 2️⃣ SYNC DOWN: Buscar do servidor e atualizar SQLite
-        const { data } = await api.get(BM_ENDPOINT);
-
-        // Marca todos os registros locais 'synced' como 'deleted'
-        await db.runAsync("UPDATE boletim_medicoes SET sync_status = 'deleted' WHERE sync_status = 'synced'");
-
-        await db.withTransactionAsync(async () => {
-            for (const apiBm of data) {
-                await db.runAsync(
-                    `INSERT OR REPLACE INTO boletim_medicoes (
-                        server_id, unidade_server_id, projeto_cod_server_id, d_aprovador_server_id, b_aprovador_server_id,
-                        periodo_inicio, periodo_fim, status_pgt, status_med, d_numero, d_data, d_status, b_numero, b_data, b_status,
-                        descricao, valor, follow_up, rev, sync_status, id 
-                    ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 
-                        (SELECT id FROM boletim_medicoes WHERE server_id = ?) 
-                    )`,
-                    [
-                        apiBm.id, 
-                        apiBm.unidade, // ID do servidor
-                        apiBm.projeto_cod, // ID do servidor
-                        apiBm.d_aprovador, // ID do servidor
-                        apiBm.b_aprovador, // ID do servidor
-                        apiBm.periodo_inicio, apiBm.periodo_fim, apiBm.status_pgt, apiBm.status_med, 
-                        apiBm.d_numero, apiBm.d_data, apiBm.d_status, apiBm.b_numero, apiBm.b_data, apiBm.b_status,
-                        apiBm.descricao, apiBm.valor, apiBm.follow_up, apiBm.rev,
-                        apiBm.id 
-                    ]
-                );
-            }
-        });
+        // --- 2️⃣ SYNC DOWN: Buscar do servidor (com paginação) ---
+        console.log("📥 Baixando BMs do servidor...");
         
-        // Remove os itens marcados como 'deleted'
-        await db.runAsync("DELETE FROM boletim_medicoes WHERE sync_status = 'deleted'");
+        // Se você quiser buscar uma pesquisa específica, pode passar como parâmetro: 
+        // ex: api.get(`${BM_ENDPOINT}?page=1&search=${termo}`)
+        const response = await api.get(`${BM_ENDPOINT}?page=1`);
 
-        console.log(`📥 Banco de BMs atualizado — total API: ${data.length} BMs`);
+        // Ajuste para Paginação: Pega .results ou o array direto
+        const serverBMs = response.data.results || (Array.isArray(response.data) ? response.data : []);
+
+        if (serverBMs.length > 0) {
+            // Opcional: Marcar como 'deleted' para limpeza (conforme seu código original)
+            await db.runAsync("UPDATE boletim_medicoes SET sync_status = 'deleted' WHERE sync_status = 'synced'");
+
+            await db.withTransactionAsync(async () => {
+                for (const apiBm of serverBMs) {
+                    await db.runAsync(
+                        `INSERT OR REPLACE INTO boletim_medicoes (
+                            server_id, unidade_server_id, projeto_cod_server_id, d_aprovador_server_id, b_aprovador_server_id,
+                            periodo_inicio, periodo_fim, status_pgt, status_med, d_numero, d_data, d_status, b_numero, b_data, b_status,
+                            descricao, valor, follow_up, rev, sync_status, id 
+                        ) VALUES (
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 
+                            (SELECT id FROM boletim_medicoes WHERE server_id = ?) 
+                        )`,
+                        [
+                            apiBm.id, 
+                            apiBm.unidade?.id || apiBm.unidade || null,
+                            apiBm.projeto_cod?.id || apiBm.projeto_cod || null,
+                            apiBm.d_aprovador?.id || apiBm.d_aprovador || null,
+                            apiBm.b_aprovador?.id || apiBm.b_aprovador || null,
+                            apiBm.periodo_inicio, apiBm.periodo_fim, apiBm.status_pgt, apiBm.status_med, 
+                            apiBm.d_numero, apiBm.d_data, apiBm.d_status, apiBm.b_numero, apiBm.b_data, apiBm.b_status,
+                            apiBm.descricao, apiBm.valor, apiBm.follow_up, apiBm.rev,
+                            apiBm.id // para o SELECT id interno
+                        ]
+                    );
+                }
+            });
+
+            // Remove os itens que não vieram na última resposta da API (opcional, cuidado com paginação aqui)
+            await db.runAsync("DELETE FROM boletim_medicoes WHERE sync_status = 'deleted'");
+            
+            console.log(`📥 Banco local atualizado — ${serverBMs.length} BMs processados.`);
+        }
 
     } catch (err) {
         console.error("❌ Sync BMs falhou:", err.message);
