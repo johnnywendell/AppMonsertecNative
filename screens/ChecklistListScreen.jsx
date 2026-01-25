@@ -80,7 +80,7 @@ const ChecklistListScreen = () => {
                 </View>
 
                 <View style={styles.cardBody}>
-                    <Text style={styles.tagText}>REC:{item.tag || 'Sem Tag'}</Text>
+                    <Text style={styles.tagText}>REC:{item.rec || 'Sem Tag'}</Text>
                     
                     <Text style={styles.recText}>TAG: {item.tag || 'N/A'}</Text>
                 </View>
