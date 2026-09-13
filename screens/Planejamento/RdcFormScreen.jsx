@@ -9,7 +9,11 @@ import { MaterialIcons } from '@expo/vector-icons';
 import CustomPickerModal from '../../components/CustomPickerModal'; 
 import DatePicker from '../../components/DatePicker'; 
 // Supondo que rdcService está no mesmo nível que dataService
-import { salvarRdcLocal, buscarRdc } from '../../services/rdcService'; 
+import {
+    criarRdc,
+    editarRdc,
+    buscarRdc
+} from '../../services/rdcService';
 
 // Importa todos os novos fetches e choices mock
 import { 
@@ -268,9 +272,47 @@ export default function RdcFormScreen({ route }) {
                 // etc.
             };
 
-            await salvarRdcLocal(payload); // Use a função para salvar local/API
-            Alert.alert("Sucesso", `RDC ${isEditing ? 'atualizado' : 'salvo'} com sucesso!`);
-            navigation.goBack(); // Retorna para a lista após salvar
+            if (isEditing) {
+
+                    await editarRdc(
+                        id,
+                        payload
+                    );
+
+                    Alert.alert(
+                        "Sucesso",
+                        "RDC atualizado com sucesso!"
+                    );
+
+                }
+
+                // ==========================================
+                // CRIAÇÃO
+                // ==========================================
+
+                else {
+
+                    const result =
+                        await criarRdc(payload);
+
+                    if (result.pending) {
+
+                        Alert.alert(
+                            "Salvo offline",
+                            "O RDC foi salvo no dispositivo e será enviado automaticamente quando a conexão voltar."
+                        );
+
+                    } else {
+
+                        Alert.alert(
+                            "Sucesso",
+                            "RDC criado com sucesso!"
+                        );
+
+                    }
+
+                }
+        navigation.goBack();
         } catch (error) {
             console.error("Erro ao salvar RDC:", error);
             Alert.alert("Erro", "Falha ao salvar o RDC. Tente novamente.");

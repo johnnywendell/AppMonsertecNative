@@ -5,33 +5,34 @@ import {
 import { useNavigation, useRoute } from '@react-navigation/native';
 import DatePicker from '../../components/DatePicker'; // Componente DatePicker (Assumido)
 
-import { 
-    salvarBoletimMedicaoLocal, 
+import {
+    criarBoletimMedicao,
+    editarBoletimMedicao,
     buscarBoletimMedicao
 } from '../../services/boletimMedicaoService';
 
 // Estado inicial para um novo BM
 const initialBMState = {
     id: null,
-    periodo_inicio: null, // YYYY-MM-DD
-    periodo_fim: null,   // YYYY-MM-DD
+    periodo_inicio: null,
+    periodo_fim: null,
     descricao: '',
     valor: '',
     status_pgt: '',
     status_med: '',
     d_numero: '',
-    d_data: null, 
+    d_data: null,
     d_status: '',
     b_numero: '',
-    b_data: null, 
+    b_data: null,
     b_status: '',
     follow_up: '',
     rev: 0,
-    // FKs (server_ids)
-    unidade_server_id: null,
-    projeto_cod_server_id: null,
-    d_aprovador_server_id: null,
-    b_aprovador_server_id: null,
+
+    unidade: null,
+    projeto_cod: null,
+    d_aprovador: null,
+    b_aprovador: null,
 };
 
 
@@ -54,31 +55,70 @@ export default function BoletimMedicaoFormScreen() {
 
     // --- EFEITO PARA CARREGAR DADOS NA EDIÇÃO ---
     useEffect(() => {
-        if (isEditing) {
+        if (!isEditing) return;
+
+        const loadBMData = async () => {
             setLoading(true);
-            const loadBMData = async () => {
-                try {
-                    const data = await buscarBoletimMedicao(bmId);
-                    if (data) {
-                        setFormData({
-                            ...initialBMState, 
-                            ...data,
-                            valor: String(data.valor || ''), 
-                        });
-                    } else {
-                        Alert.alert('Erro', 'Boletim de Medição não encontrado.');
-                        navigation.goBack();
-                    }
-                } catch (error) {
-                    console.error('Erro ao carregar BM:', error);
-                    Alert.alert('Erro', 'Não foi possível carregar os dados do BM.');
+
+            try {
+                const data = await buscarBoletimMedicao(bmId);
+
+                if (!data) {
+                    Alert.alert('Erro', 'Boletim de Medição não encontrado.');
                     navigation.goBack();
-                } finally {
-                    setLoading(false);
+                    return;
                 }
-            };
-            loadBMData();
-        }
+
+                setFormData({
+                    ...initialBMState,
+                    ...data,
+
+                    valor: data.valor !== null && data.valor !== undefined
+                        ? String(data.valor)
+                        : '',
+
+                    rev: data.rev ?? 0,
+
+                    unidade:
+                        data.unidade?.id ??
+                        data.unidade_id ??
+                        data.unidade ??
+                        null,
+
+                    projeto_cod:
+                        data.projeto_cod?.id ??
+                        data.projeto_cod_id ??
+                        data.projeto_cod ??
+                        null,
+
+                    d_aprovador:
+                        data.d_aprovador?.id ??
+                        data.d_aprovador_id ??
+                        data.d_aprovador ??
+                        null,
+
+                    b_aprovador:
+                        data.b_aprovador?.id ??
+                        data.b_aprovador_id ??
+                        data.b_aprovador ??
+                        null,
+                });
+
+            } catch (error) {
+                console.error(
+                    'Erro ao carregar BM:',
+                    error.response?.data || error.message
+                );
+
+                Alert.alert('Erro', 'Não foi possível carregar os dados do BM.');
+                navigation.goBack();
+
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadBMData();
     }, [bmId, isEditing, navigation]);
 
     // --- HANDLERS DE FORMULÁRIO ---
@@ -87,33 +127,89 @@ export default function BoletimMedicaoFormScreen() {
     };
 
     const handleSave = async () => {
-        setSaving(true);
-        try {
-            // Validação mínima
-            if (!formData.periodo_inicio || !formData.periodo_fim || !formData.descricao) {
-                Alert.alert('Atenção', 'Preencha o Período de Início, Fim e a Descrição.');
-                setSaving(false);
-                return;
-            }
+        if (!formData.periodo_inicio || !formData.periodo_fim || !formData.descricao) {
+            Alert.alert(
+                'Atenção',
+                'Preencha o Período de Início, Fim e a Descrição.'
+            );
+            return;
+        }
 
-            // Preparar dados para salvar
+        setSaving(true);
+
+        try {
+            const valorNormalizado =
+                formData.valor !== '' &&
+                formData.valor !== null &&
+                formData.valor !== undefined
+                    ? Number(String(formData.valor).replace(',', '.'))
+                    : null;
+
             const dataToSave = {
-                ...formData,
-                // Trata a conversão de valor para float, garantindo que use ponto como separador decimal
-                valor: parseFloat(String(formData.valor).replace(',', '.')) || null,
-                rev: parseInt(formData.rev) || 0,
-                id: isEditing ? bmId : null,
+                periodo_inicio: formData.periodo_inicio,
+                periodo_fim: formData.periodo_fim,
+                descricao: formData.descricao,
+                valor: Number.isNaN(valorNormalizado) ? null : valorNormalizado,
+
+                status_pgt: formData.status_pgt || null,
+                status_med: formData.status_med || null,
+
+                d_numero: formData.d_numero || null,
+                d_data: formData.d_data || null,
+                d_status: formData.d_status || null,
+
+                b_numero: formData.b_numero || null,
+                b_data: formData.b_data || null,
+                b_status: formData.b_status || null,
+
+                follow_up: formData.follow_up || null,
+                rev: Number(formData.rev) || 0,
+
+                unidade: formData.unidade || null,
+                projeto_cod: formData.projeto_cod || null,
+                d_aprovador: formData.d_aprovador || null,
+                b_aprovador: formData.b_aprovador || null,
             };
 
-            await salvarBoletimMedicaoLocal(dataToSave);
-            
-            Alert.alert('Sucesso', `Boletim de Medição salvo ${isEditing ? 'e atualizado' : ''} com sucesso! Será sincronizado.`, [
-                { text: 'OK', onPress: () => navigation.goBack() }
-            ]);
+            if (isEditing) {
+                await editarBoletimMedicao(bmId, dataToSave);
+
+                Alert.alert(
+                    'Sucesso',
+                    'Boletim de Medição atualizado com sucesso!',
+                    [{ text: 'OK', onPress: () => navigation.goBack() }]
+                );
+
+            } else {
+                const result = await criarBoletimMedicao(dataToSave);
+
+                if (result.pending) {
+                    Alert.alert(
+                        'Salvo offline',
+                        'O Boletim de Medição foi salvo no dispositivo e será enviado automaticamente quando a conexão voltar.',
+                        [{ text: 'OK', onPress: () => navigation.goBack() }]
+                    );
+                } else {
+                    Alert.alert(
+                        'Sucesso',
+                        'Boletim de Medição criado com sucesso!',
+                        [{ text: 'OK', onPress: () => navigation.goBack() }]
+                    );
+                }
+            }
 
         } catch (error) {
-            console.error('Erro ao salvar BM:', error.message);
-            Alert.alert('Erro', `Falha ao salvar o BM: ${error.message}`);
+            const errorData = error.response?.data || error.message || error;
+
+            console.error('Erro ao salvar BM:', errorData);
+
+            Alert.alert(
+                'Erro',
+                error.response?.data
+                    ? JSON.stringify(error.response.data, null, 2)
+                    : error.message || 'Falha ao salvar o Boletim de Medição.'
+            );
+
         } finally {
             setSaving(false);
         }

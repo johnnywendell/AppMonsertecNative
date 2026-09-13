@@ -8,9 +8,12 @@ import { MaterialIcons } from '@expo/vector-icons';
 
 import CustomPickerModal from '../../components/CustomPickerModal'; 
 import DatePicker from '../../components/DatePicker'; 
-// Supondo que levantamentoService está no mesmo nível
-import { salvarLevantamentoLocal, buscarLevantamento } from '../../services/levantamentoService'; 
 
+import {
+    criarLevantamento,
+    editarLevantamento,
+    buscarLevantamento
+} from '../../services/levantamentoService';
 // Importa os fetches e choices
 import { 
     fetchSolicitantes, fetchAprovadores, fetchUnidades, fetchASOptions, 
@@ -21,7 +24,7 @@ import {
 
 // --- Choices Específicas para Levantamento de Pintura ---
 
-// 'tipo_serv' é um novo campo de Choice no Item
+// 'tipo_serv' é
 const TIPO_SERV_CHOICES = [
     { label: 'INTERNO', value: 'INT' },
     { label: 'EXTERNO', value: 'EXT' },
@@ -232,9 +235,11 @@ export default function LevantamentoFormScreen({ route }) {
     // Função para obter o label de exibição
     const getPickerLabel = (key, value) => {
         if (value === null || value === undefined || value === '') return 'Selecione...';
+
         const options = pickerOptions[key] || [];
-        const selected = options.find(opt => opt.value === value);
-        return selected ? selected.label : `${value}`; 
+        const selected = options.find(opt => opt.value == value);
+
+        return selected ? String(selected.label) : String(value);
     };
     
     // Handler para campos do Levantamento pai
@@ -261,107 +266,190 @@ export default function LevantamentoFormScreen({ route }) {
     };
     
     // -----------------------------------------------------------
-    // --- FUNÇÃO DE SALVAMENTO (AJUSTADA) ---
+    // --- FUNÇÃO DE SALVAMENTO
     // -----------------------------------------------------------
 
     const handleSave = async () => {
-        if (!levantamento.auth_serv || !levantamento.unidade || levantamento.itens_pintura.length === 0) {
-            Alert.alert("Erro", "Campos Autorização de Serviço, Unidade e pelo menos um Item são obrigatórios.");
+        if (!levantamento.unidade) {
+            Alert.alert("Erro", "O campo Unidade é obrigatório.");
             return;
         }
 
         setLoading(true);
+
         try {
-            // Lista de chaves numéricas no item filho
-            const numericKeys = ['polegada', 'm_quantidade', 'm2', 'raio', 'largura', 'altura', 'comprimento', 'lados'];
-            
-            const payload = { 
+            const numericKeys = [
+                'polegada', 'm_quantidade', 'm2', 'raio',
+                'largura', 'altura', 'comprimento', 'lados'
+            ];
+
+            const payload = {
                 ...levantamento,
-                
+
                 itens_pintura: levantamento.itens_pintura.map(item => {
                     const newItem = { ...item };
-                    numericKeys.forEach(key => {
-                        // Converte a string (permitindo vírgula) para Number/Float, ou usa null se não for válido.
-                        const value = item[key].replace(',', '.');
-                        newItem[key] = value && !isNaN(Number(value)) ? Number(value) : null;
-                    });
-                    
-                    // Os campos PC e Elastomero são passados como string de texto livre.
-                    newItem.pc = newItem.pc.trim() || null;
-                    newItem.elastomero = newItem.elastomero.trim() || null;
 
-                    // Remove o ID local (Date.now()) se for um item novo (sem ID de DB)
-                    if (String(newItem.id).startsWith('17')) { // Heurística para ID local
+                    numericKeys.forEach(key => {
+                        const rawValue = item[key];
+
+                        if (rawValue === null || rawValue === undefined || rawValue === '') {
+                            newItem[key] = null;
+                            return;
+                        }
+
+                        const value = String(rawValue).replace(',', '.');
+                        newItem[key] = !isNaN(Number(value)) ? Number(value) : null;
+                    });
+
+                    newItem.pc = String(newItem.pc || '').trim() || null;
+                    newItem.elastomero = String(newItem.elastomero || '').trim() || null;
+
+                    // ID criado apenas para controle do array no React
+                    if (typeof newItem.id === 'number' && newItem.id > 1000000000000) {
                         delete newItem.id;
                     }
+
                     return newItem;
                 }),
-                // Limpeza de FKs que possam ter vindo como ''
-                auth_serv: levantamento.auth_serv || null, 
-                unidade: levantamento.unidade || null, 
+
+                auth_serv: levantamento.auth_serv || null,
+                unidade: levantamento.unidade || null,
                 projeto_cod: levantamento.projeto_cod || null,
             };
 
-            await salvarLevantamentoLocal(payload); 
-            Alert.alert("Sucesso", `Levantamento de Pintura ${isEditing ? 'atualizado' : 'salvo'} com sucesso!`);
-            navigation.goBack(); 
+            if (isEditing) {
+                await editarLevantamento(id, payload);
+
+                Alert.alert(
+                    "Sucesso",
+                    "Levantamento de Pintura atualizado com sucesso!",
+                    [{ text: "OK", onPress: () => navigation.goBack() }]
+                );
+
+            } else {
+                const result = await criarLevantamento(payload);
+
+                if (result.pending) {
+                    Alert.alert(
+                        "Salvo offline",
+                        "O Levantamento foi salvo no dispositivo e será enviado automaticamente quando a conexão voltar.",
+                        [{ text: "OK", onPress: () => navigation.goBack() }]
+                    );
+                } else {
+                    Alert.alert(
+                        "Sucesso",
+                        "Levantamento de Pintura criado com sucesso!",
+                        [{ text: "OK", onPress: () => navigation.goBack() }]
+                    );
+                }
+            }
+
         } catch (error) {
-            console.error("Erro ao salvar Levantamento:", error);
-            Alert.alert("Erro", "Falha ao salvar o Levantamento. Tente novamente.");
+            const errorData = error.response?.data || error.message || error;
+
+            console.error("Erro ao salvar Levantamento:", errorData);
+
+            Alert.alert(
+                "Erro",
+                error.response?.data
+                    ? JSON.stringify(error.response.data, null, 2)
+                    : error.message || "Falha ao salvar o Levantamento."
+            );
+
         } finally {
             setLoading(false);
         }
     };
     
     // -----------------------------------------------------------
-    // --- EFEITO DE CARREGAMENTO (AJUSTADO) ---
+    // --- EFEITO DE CARREGAMENTO 
     // -----------------------------------------------------------
 
     useEffect(() => {
-        loadAllPickerOptions(); 
-        if (isEditing) {
-             const loadData = async () => {
-                 try {
-                     const data = await buscarLevantamento(id); 
-                     if (data) {
-                         const convertChildren = (list) => list.map(item => {
-                             const newItem = { ...item };
-                             const numericKeys = ['polegada', 'm_quantidade', 'm2', 'raio', 'largura', 'altura', 'comprimento', 'lados'];
-                             numericKeys.forEach(key => {
-                                 if (newItem[key] !== undefined && newItem[key] !== null) {
-                                     // Converte número para string para exibição no TextInput, usa replace para garantir vírgula
-                                     newItem[key] = String(newItem[key]).replace('.', ',');
-                                 } else {
-                                     newItem[key] = '0'; // Garante que campos numéricos vazios venham como '0' para o input
-                                 }
-                             });
-                             
-                             // Garante que PC e Elastomero sejam strings vazias se forem null/undefined
-                             newItem.pc = newItem.pc || '';
-                             newItem.elastomero = newItem.elastomero || '';
+        loadAllPickerOptions();
 
-                             if (!item.id) newItem.id = Date.now(); 
-                             return newItem;
-                         });
-                         
-                         setLevantamento({
-                             ...data,
-                             // O Serializer usa 'itens_pintura' na resposta, então usamos essa chave.
-                             itens_pintura: convertChildren(data.itens_pintura || []),
-                         });
-                     }
-                 } catch (error) {
-                     console.error('Erro ao carregar Levantamento:', error);
-                 } finally {
-                     setLoading(false);
-                 }
-             };
-             loadData();
-        } else {
-             setLoading(false);
+        if (!isEditing) {
+            setLoading(false);
+            return;
         }
-    }, [id, loadAllPickerOptions]);
 
+        const loadData = async () => {
+            try {
+                const data = await buscarLevantamento(id);
+
+                if (!data) return;
+
+                const convertChildren = (list) => {
+                    return list.map(item => {
+                        const newItem = { ...item };
+
+                        const numericKeys = [
+                            'polegada', 'm_quantidade', 'm2', 'raio',
+                            'largura', 'altura', 'comprimento', 'lados'
+                        ];
+
+                        numericKeys.forEach(key => {
+                            if (newItem[key] !== undefined && newItem[key] !== null) {
+                                newItem[key] = String(newItem[key]).replace('.', ',');
+                            } else {
+                                newItem[key] = '0';
+                            }
+                        });
+
+                        newItem.pc = newItem.pc || '';
+                        newItem.elastomero = newItem.elastomero || '';
+
+                        if (!newItem.id) {
+                            newItem.id = Date.now() + Math.random();
+                        }
+
+                        return newItem;
+                    });
+                };
+
+                setLevantamento({
+                    ...data,
+
+                    auth_serv:
+                        data.auth_serv?.id ??
+                        data.auth_serv_id ??
+                        data.auth_serv ??
+                        null,
+
+                    unidade:
+                        data.unidade?.id ??
+                        data.unidade_id ??
+                        data.unidade ??
+                        null,
+
+                    projeto_cod:
+                        data.projeto_cod?.id ??
+                        data.projeto_cod_id ??
+                        data.projeto_cod ??
+                        null,
+
+                    itens_pintura: convertChildren(data.itens_pintura || []),
+                });
+
+            } catch (error) {
+                console.error(
+                    'Erro ao carregar Levantamento:',
+                    error.response?.data || error.message
+                );
+
+                Alert.alert(
+                    'Erro',
+                    'Não foi possível carregar o Levantamento.'
+                );
+
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadData();
+
+    }, [id, isEditing, loadAllPickerOptions]);
 
     // -----------------------------------------------------------
     // --- RENDERIZAÇÃO DE ITENS FILHOS (AJUSTADA) ---

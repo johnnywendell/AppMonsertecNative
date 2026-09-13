@@ -1,223 +1,599 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl, SafeAreaView } from 'react-native';
-import { useNavigation, useIsFocused } from '@react-navigation/native';
-import { listarChecklists } from '../services/checklistQualidadeService';
-import NetInfo from '@react-native-community/netinfo';
-import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
+import React, {
+    useState,
+    useCallback,
+    useEffect
+} from 'react';
 
-const PRIMARY = '#16356C';
-const SUCCESS = '#28a745';
-const DANGER = '#dc3545';
-const WARNING = '#ff9800';
+import {
+    View,
+    Text,
+    StyleSheet,
+    FlatList,
+    TouchableOpacity,
+    ActivityIndicator,
+    TextInput
+} from 'react-native';
 
-const ChecklistListScreen = () => {
-    const navigation = useNavigation();
-    const isFocused = useIsFocused();
-    const [checklists, setChecklists] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
-    const [isOnline, setIsOnline] = useState(true);
+import {
+    useFocusEffect,
+    useNavigation
+} from '@react-navigation/native';
 
-    const carregarChecklists = useCallback(async () => {
+import {
+    listarChecklists
+} from '../services/checklistQualidadeService';
+
+import {
+    MaterialIcons
+} from '@expo/vector-icons';
+
+import {
+    format,
+    parseISO
+} from 'date-fns';
+
+import {
+    ptBR
+} from 'date-fns/locale';
+
+
+const PRIMARY = '#00315c';
+
+
+export default function ChecklistListScreen() {
+
+    const navigation =
+        useNavigation();
+
+    const [checklists, setChecklists] =
+        useState([]);
+
+    const [loading, setLoading] =
+        useState(true);
+
+    const [isRefreshing, setIsRefreshing] =
+        useState(false);
+
+    const [searchText, setSearchText] =
+        useState('');
+
+    const [page, setPage] =
+        useState(1);
+
+    const [loadingMore, setLoadingMore] =
+        useState(false);
+
+    const [hasMore, setHasMore] =
+        useState(false);
+
+
+    // =========================================================
+    // BUSCAR CHECKLISTS
+    // =========================================================
+
+    const fetchChecklists = async (
+        pageNum = 1,
+        shouldRefresh = false
+    ) => {
+
+        if (pageNum > 1) {
+            setLoadingMore(true);
+        } else {
+            setHasMore(false);
+        }
+
         try {
-            setRefreshing(true);
-            const netInfo = await NetInfo.fetch();
-            setIsOnline(netInfo.isConnected);
-            
-            const data = await listarChecklists();
-            setChecklists(data);
+
+            const response =
+                await listarChecklists({
+                    page: pageNum,
+                    search: searchText,
+                });
+
+            const data =
+                response.results || [];
+
+            setHasMore(
+                Boolean(response.next)
+            );
+
+            if (
+                shouldRefresh ||
+                pageNum === 1
+            ) {
+
+                setChecklists(data);
+
+            } else {
+
+                setChecklists(prev => [
+                    ...prev,
+                    ...data
+                ]);
+            }
+
         } catch (error) {
-            console.error('Erro ao carregar checklists:', error);
+
+            console.error(
+                'Erro ao buscar checklists:',
+                error.response?.data ||
+                error.message
+            );
+
         } finally {
+
             setLoading(false);
-            setRefreshing(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        if (isFocused) {
-            carregarChecklists();
-        }
-    }, [isFocused, carregarChecklists]);
-
-    const formatarData = (dataRaw) => {
-        if (!dataRaw) return '--/--/--';
-        
-        try {
-            // Pega apenas os primeiros 10 caracteres (YYYY-MM-DD) 
-            // ignorando o T00:00:00-03:00 que o Django enviou
-            const dataApenas = dataRaw.substring(0, 10);
-            const [ano, mes, dia] = dataApenas.split('-');
-            
-            if (!dia || !mes || !ano) return dataRaw; // Fallback caso o formato mude
-            
-            return `${dia}/${mes}/${ano}`;
-        } catch (e) {
-            console.error("Erro ao formatar data:", e);
-            return dataRaw;
+            setLoadingMore(false);
+            setIsRefreshing(false);
         }
     };
 
-    const renderItem = ({ item }) => {
-        const idFormatado = `C${String(item.id).padStart(4, '0')}/${item.data?.split('-')[0] || '2024'}`;
-        const isPending = item.sync_status === 'pending';
+
+    // =========================================================
+    // CARREGAR AO ENTRAR NA TELA
+    // =========================================================
+
+    useFocusEffect(
+        useCallback(() => {
+
+            if (searchText === '') {
+
+                setPage(1);
+                setHasMore(false);
+
+                fetchChecklists(
+                    1,
+                    true
+                );
+            }
+
+        }, [])
+    );
+
+
+    // =========================================================
+    // BUSCA COM DEBOUNCE
+    // =========================================================
+
+    useEffect(() => {
+
+        if (searchText === '') {
+            return;
+        }
+
+        const delayDebounce =
+            setTimeout(() => {
+
+                setPage(1);
+                setHasMore(false);
+
+                fetchChecklists(
+                    1,
+                    true
+                );
+
+            }, 800);
+
+        return () =>
+            clearTimeout(
+                delayDebounce
+            );
+
+    }, [searchText]);
+
+
+    // =========================================================
+    // REFRESH
+    // =========================================================
+
+    const handleRefresh = () => {
+
+        setIsRefreshing(true);
+        setPage(1);
+        setHasMore(false);
+
+        fetchChecklists(
+            1,
+            true
+        );
+    };
+
+
+    // =========================================================
+    // PAGINAÇÃO
+    // =========================================================
+
+    const handleLoadMore = () => {
+
+        if (
+            loadingMore ||
+            loading ||
+            !hasMore
+        ) {
+            return;
+        }
+
+        const nextPage =
+            page + 1;
+
+        setPage(nextPage);
+
+        fetchChecklists(
+            nextPage
+        );
+    };
+
+
+    // =========================================================
+    // FOOTER
+    // =========================================================
+
+    const renderFooter = () => {
+
+        if (!loadingMore) {
+            return null;
+        }
+
+        return (
+            <View
+                style={styles.loadingMore}
+            >
+                <ActivityIndicator
+                    size="small"
+                    color={PRIMARY}
+                />
+            </View>
+        );
+    };
+
+
+    // =========================================================
+    // ITEM
+    // =========================================================
+
+    const renderItem = ({
+        item
+    }) => {
+
+        const dataFormatada =
+            item.data
+                ? format(
+                    parseISO(item.data),
+                    'dd/MM/yyyy',
+                    {
+                        locale: ptBR
+                    }
+                )
+                : 'S/ Data';
+
+        const ano =
+            item.data
+                ? String(
+                    item.data
+                ).substring(0, 4)
+                : '----';
+
+        const numero =
+            `C${String(item.id)
+                .padStart(4, '0')}/${ano}`;
 
         return (
             <TouchableOpacity
-                style={styles.card}
-                activeOpacity={0.7}
-                onPress={() => navigation.navigate('EditarChecklistQualidade', {
-                    id: item.id,
-                    numero: idFormatado
-                })}
+                style={
+                    styles.itemContainer
+                }
+                activeOpacity={0.8}
+                onPress={() =>
+                    navigation.navigate(
+                        'ChecklistForm',
+                        {
+                            id: item.id
+                        }
+                    )
+                }
             >
-                <View style={styles.cardHeader}>
-                    <View style={styles.idContainer}>
-                        <FontAwesome5 name="clipboard-check" size={14} color={PRIMARY} />
-                        <Text style={styles.idText}>{idFormatado}</Text>
-                    </View>
-                    <Text style={styles.dateText}>{formatarData(item.data)}</Text>
+
+                <View
+                    style={
+                        styles.textContainer
+                    }
+                >
+
+                    <Text
+                        style={
+                            styles.checklistTitle
+                        }
+                    >
+                        Checklist Nº {numero}
+                    </Text>
+
+                    <Text
+                        style={
+                            styles.detailText
+                        }
+                    >
+                        Data: {dataFormatada}
+                    </Text>
+
+                    <Text
+                        style={
+                            styles.detailText
+                        }
+                        numberOfLines={1}
+                    >
+                        Cliente: {
+                            item.cliente ||
+                            'Não informado'
+                        }
+                    </Text>
+
+                    <Text
+                        style={
+                            styles.detailText
+                        }
+                        numberOfLines={1}
+                    >
+                        REC: {
+                            item.rec ||
+                            'Não informado'
+                        }
+                    </Text>
+
+                    <Text
+                        style={
+                            styles.detailText
+                        }
+                        numberOfLines={1}
+                    >
+                        TAG: {
+                            item.tag ||
+                            'Não informado'
+                        }
+                    </Text>
+
                 </View>
 
-                <View style={styles.cardBody}>
-                    <Text style={styles.tagText}>REC:{item.rec || 'Sem Tag'}</Text>
-                    
-                    <Text style={styles.recText}>TAG: {item.tag || 'N/A'}</Text>
-                </View>
+                <MaterialIcons
+                    name="chevron-right"
+                    size={30}
+                    color={PRIMARY}
+                />
 
-                <View style={styles.cardFooter}>
-                    <View style={styles.syncIndicator}>
-                        <View style={[styles.statusDot, { backgroundColor: isPending ? WARNING : SUCCESS }]} />
-                        <Text style={[styles.syncText, { color: isPending ? WARNING : SUCCESS }]}>
-                            {isPending ? 'Aguardando Sincronização' : 'Sincronizado'}
-                        </Text>
-                    </View>
-                    <MaterialIcons name="chevron-right" size={24} color="#CCC" />
-                </View>
             </TouchableOpacity>
         );
     };
 
-    return (
-        <SafeAreaView style={styles.container}>
-            {/* Barra de Status de Conexão */}
-            <View style={[styles.connectionBar, { backgroundColor: isOnline ? SUCCESS : DANGER }]}>
-                <Text style={styles.connectionText}>
-                    {isOnline ? 'CONECTADO AO SERVIDOR' : 'MODO OFFLINE'}
-                </Text>
-            </View>
 
-            {loading && !refreshing ? (
-                <View style={styles.center}>
-                    <ActivityIndicator size="large" color={PRIMARY} />
-                    <Text style={{ marginTop: 10, color: '#666' }}>Carregando dados...</Text>
-                </View>
-            ) : (
-                <FlatList
-                    data={checklists}
-                    renderItem={renderItem}
-                    keyExtractor={(item) => item.id.toString()}
-                    contentContainerStyle={styles.listContent}
-                    refreshControl={
-                        <RefreshControl refreshing={refreshing} onRefresh={carregarChecklists} colors={[PRIMARY]} />
-                    }
-                    ListEmptyComponent={
-                        <View style={styles.center}>
-                            <MaterialIcons name="assignment-late" size={50} color="#ccc" />
-                            <Text style={styles.emptyText}>Nenhum checklist encontrado.</Text>
-                        </View>
+    // =========================================================
+    // RENDER
+    // =========================================================
+
+    return (
+        <View
+            style={
+                styles.container
+            }
+        >
+
+            {/* BUSCA */}
+
+            <View
+                style={
+                    styles.searchContainer
+                }
+            >
+
+                <MaterialIcons
+                    name="search"
+                    size={24}
+                    color="#666"
+                    style={
+                        styles.searchIcon
                     }
                 />
-            )}
 
-            {/* FAB - Botão Flutuante */}
+                <TextInput
+                    style={
+                        styles.searchInput
+                    }
+                    placeholder="Pesquisar checklist..."
+                    value={searchText}
+                    onChangeText={
+                        setSearchText
+                    }
+                    clearButtonMode="while-editing"
+                />
+
+            </View>
+
+
+            {/* LISTA */}
+
+            <FlatList
+                data={checklists}
+
+                renderItem={
+                    renderItem
+                }
+
+                keyExtractor={
+                    item =>
+                        String(item.id)
+                }
+
+                contentContainerStyle={
+                    styles.listContent
+                }
+
+                onEndReached={
+                    handleLoadMore
+                }
+
+                onEndReachedThreshold={
+                    0.3
+                }
+
+                ListFooterComponent={
+                    renderFooter
+                }
+
+                refreshing={
+                    isRefreshing
+                }
+
+                onRefresh={
+                    handleRefresh
+                }
+
+                ListEmptyComponent={() =>
+                    !loading ? (
+                        <Text
+                            style={
+                                styles.emptyText
+                            }
+                        >
+                            Nenhum checklist encontrado.
+                        </Text>
+                    ) : null
+                }
+            />
+
+
+            {/* FAB */}
+
             <TouchableOpacity
-                style={styles.fab}
-                onPress={() => navigation.navigate('CriarChecklistQualidade')}
-                activeOpacity={0.8}
+                style={
+                    styles.fab
+                }
+                onPress={() =>
+                    navigation.navigate(
+                        'ChecklistForm'
+                    )
+                }
             >
-                <MaterialIcons name="add" size={32} color="#fff" />
+
+                <MaterialIcons
+                    name="add"
+                    size={28}
+                    color="#fff"
+                />
+
             </TouchableOpacity>
-        </SafeAreaView>
+
+        </View>
     );
-};
+}
+
+
+// =========================================================
+// STYLES
+// =========================================================
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F4F7FA' },
-    center: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 50 },
-    connectionBar: {
-        paddingVertical: 4,
+
+    container: {
+        flex: 1,
+        backgroundColor: '#f5f5f5',
+    },
+
+
+    searchContainer: {
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-    },
-    connectionText: {
-        color: '#fff',
-        fontSize: 10,
-        fontWeight: 'bold',
-        letterSpacing: 1,
-    },
-    listContent: { padding: 12, paddingBottom: 100 },
-    card: {
         backgroundColor: '#fff',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 12,
-        // Sombras para Android e iOS
-        elevation: 3,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
+        margin: 12,
+        marginBottom: 6,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#ddd',
+        paddingHorizontal: 10,
     },
-    cardHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        borderBottomWidth: 1,
-        borderBottomColor: '#F0F0F0',
-        paddingBottom: 8,
-        marginBottom: 10,
+
+
+    searchIcon: {
+        marginRight: 6,
     },
-    idContainer: { flexDirection: 'row', alignItems: 'center' },
-    idText: {
+
+
+    searchInput: {
+        flex: 1,
+        height: 46,
         fontSize: 15,
-        fontWeight: 'bold',
-        color: PRIMARY,
-        marginLeft: 6,
+        color: '#333',
     },
-    dateText: { fontSize: 13, color: '#888', fontWeight: '500' },
-    cardBody: { marginBottom: 12 },
-    tagText: { fontSize: 17, fontWeight: 'bold', color: '#333', marginBottom: 4 },
-    unidadeText: { fontSize: 14, color: '#666', marginBottom: 4 },
-    recText: { fontSize: 13, color: '#444', fontStyle: 'italic' },
-    cardFooter: {
+
+
+    listContent: {
+        padding: 12,
+        paddingTop: 6,
+        paddingBottom: 90,
+    },
+
+
+    itemContainer: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
-        paddingTop: 8,
-        borderTopWidth: 1,
-        borderTopColor: '#F0F0F0',
+        backgroundColor: '#fff',
+        borderRadius: 8,
+        padding: 14,
+        marginBottom: 10,
+
+        elevation: 2,
+
+        shadowColor: '#000',
+        shadowOpacity: 0.05,
+        shadowRadius: 3,
+        shadowOffset: {
+            width: 0,
+            height: 1
+        },
     },
-    syncIndicator: { flexDirection: 'row', alignItems: 'center' },
-    statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
-    syncText: { fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase' },
+
+
+    textContainer: {
+        flex: 1,
+    },
+
+
+    checklistTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: PRIMARY,
+        marginBottom: 5,
+    },
+
+
+    detailText: {
+        fontSize: 13,
+        color: '#666',
+        marginTop: 2,
+    },
+
+
+    emptyText: {
+        textAlign: 'center',
+        color: '#777',
+        marginTop: 40,
+        fontSize: 14,
+    },
+
+
+    loadingMore: {
+        paddingVertical: 20,
+    },
+
+
     fab: {
         position: 'absolute',
         right: 20,
-        bottom: 25,
+        bottom: 20,
+        width: 58,
+        height: 58,
+        borderRadius: 29,
         backgroundColor: PRIMARY,
-        width: 65,
-        height: 65,
-        borderRadius: 32.5,
         alignItems: 'center',
         justifyContent: 'center',
         elevation: 6,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.3,
-        shadowRadius: 5,
     },
-    emptyText: { textAlign: 'center', color: '#999', fontSize: 16, marginTop: 10 },
-});
 
-export default ChecklistListScreen;
+});

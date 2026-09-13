@@ -1,268 +1,528 @@
-import React, { useState, useCallback, useRef } from 'react';
-import { 
-    View, TouchableOpacity, StyleSheet, Text, FlatList, 
-    ActivityIndicator, RefreshControl, SafeAreaView 
+import React, {
+    useState,
+    useCallback,
+    useEffect
+} from 'react';
+
+import {
+    View,
+    Text,
+    StyleSheet,
+    FlatList,
+    TouchableOpacity,
+    ActivityIndicator,
+    TextInput
 } from 'react-native';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { listarRelatorios } from '../services/relatorioQualidadeService';
-import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
+
+import {
+    useFocusEffect,
+    useNavigation
+} from '@react-navigation/native';
+
+import {
+    listarRelatorios
+} from '../services/relatorioQualidadeService';
+
+import {
+    MaterialIcons
+} from '@expo/vector-icons';
+
+import {
+    format,
+    parseISO
+} from 'date-fns';
+
+import {
+    ptBR
+} from 'date-fns/locale';
 
 const PRIMARY = '#00315c';
-const SECONDARY = '#E7F0FD';
 
 export default function QualidadeScreen() {
     const navigation = useNavigation();
-    const [relatorios, setRelatorios] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [loadingMore, setLoadingMore] = useState(false);
-    const [page, setPage] = useState(1);
-    const [hasNextPage, setHasNextPage] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
 
-    const isFetching = useRef(false);
+    const [relatorios, setRelatorios] =
+        useState([]);
 
-    // Função de formatação de data idêntica à do Checklist
-    const formatarData = (dataRaw) => {
-        if (!dataRaw) return '--/--/--';
+    const [loading, setLoading] =
+        useState(true);
+
+    const [isRefreshing, setIsRefreshing] =
+        useState(false);
+
+    const [searchText, setSearchText] =
+        useState('');
+
+    const [page, setPage] =
+        useState(1);
+
+    const [loadingMore, setLoadingMore] =
+        useState(false);
+
+    const [hasMore, setHasMore] =
+        useState(false);
+
+    // =========================================================
+    // BUSCAR RELATÓRIOS
+    // =========================================================
+
+    const fetchRelatorios = async (
+        pageNum = 1,
+        shouldRefresh = false
+    ) => {
+        if (pageNum > 1) {
+            setLoadingMore(true);
+        } else {
+            setHasMore(false);
+        }
+
         try {
-            const dataApenas = dataRaw.substring(0, 10);
-            const [ano, mes, dia] = dataApenas.split('-');
-            return `${dia}/${mes}/${ano}`;
-        } catch (e) {
-            return dataRaw;
+            const response =
+                await listarRelatorios({
+                    page: pageNum,
+                    search: searchText,
+                });
+
+            const data =
+                response.results || [];
+
+            setHasMore(
+                Boolean(response.next)
+            );
+
+            if (
+                shouldRefresh ||
+                pageNum === 1
+            ) {
+                setRelatorios(data);
+            } else {
+                setRelatorios(prev => [
+                    ...prev,
+                    ...data
+                ]);
+            }
+
+        } catch (error) {
+            console.error(
+                'Erro ao buscar relatórios:',
+                error.response?.data ||
+                error.message
+            );
+
+        } finally {
+            setLoading(false);
+            setLoadingMore(false);
+            setIsRefreshing(false);
         }
     };
 
-    const carregarDados = useCallback(async (paginaAlvo = 1, isRefreshing = false) => {
-        if (isFetching.current) return;
-        if (paginaAlvo > 1 && !hasNextPage) return;
-
-        try {
-            isFetching.current = true;
-            if (paginaAlvo === 1) {
-                if (!isRefreshing) setLoading(true);
-            } else {
-                setLoadingMore(true);
-            }
-
-            const data = await listarRelatorios(paginaAlvo);
-            const novosRelatorios = data?.results || [];
-            
-            setRelatorios(prev => {
-                if (paginaAlvo === 1) return novosRelatorios;
-                const idsExistentes = new Set(prev.map(r => r.id));
-                const filtrados = novosRelatorios.filter(r => !idsExistentes.has(r.id));
-                return [...prev, ...filtrados];
-            });
-
-            setHasNextPage(!!data?.next);
-            setPage(paginaAlvo);
-
-        } catch (error) {
-            console.error("Erro na busca:", error);
-        } finally {
-            isFetching.current = false;
-            setLoading(false);
-            setLoadingMore(false);
-            setRefreshing(false);
-        }
-    }, [hasNextPage]);
+    // =========================================================
+    // CARREGAR AO ENTRAR NA TELA
+    // =========================================================
 
     useFocusEffect(
         useCallback(() => {
-            carregarDados(1);
-        }, [carregarDados])
+            if (searchText === '') {
+                setPage(1);
+                setHasMore(false);
+
+                fetchRelatorios(
+                    1,
+                    true
+                );
+            }
+        }, [])
     );
 
+    // =========================================================
+    // BUSCA COM DEBOUNCE
+    // =========================================================
+
+    useEffect(() => {
+        if (searchText === '') return;
+
+        const delayDebounce =
+            setTimeout(() => {
+                setPage(1);
+                setHasMore(false);
+
+                fetchRelatorios(
+                    1,
+                    true
+                );
+            }, 800);
+
+        return () =>
+            clearTimeout(
+                delayDebounce
+            );
+
+    }, [searchText]);
+
+    // =========================================================
+    // REFRESH
+    // =========================================================
+
     const handleRefresh = () => {
-        setHasNextPage(true);
-        carregarDados(1, true);
+        setIsRefreshing(true);
+        setPage(1);
+        setHasMore(false);
+
+        fetchRelatorios(
+            1,
+            true
+        );
     };
+
+    // =========================================================
+    // PAGINAÇÃO
+    // =========================================================
 
     const handleLoadMore = () => {
-        if (!isFetching.current && hasNextPage && !loading && !loadingMore) {
-            carregarDados(page + 1);
+        if (
+            loadingMore ||
+            loading ||
+            !hasMore
+        ) {
+            return;
         }
+
+        const nextPage =
+            page + 1;
+
+        setPage(nextPage);
+
+        fetchRelatorios(
+            nextPage
+        );
     };
 
-    const renderItem = ({ item }) => {
-    const ano = item.data ? item.data.split('-')[0] : '---';
-    const numeroFormatado = `#S${String(item.id).padStart(4, '0')}/${ano}`;
-    
-    // Como os dados vêm do listarRelatorios (API), eles estão OK.
-    // Se o ID for temporário (ex: negativo ou string), seria 'pending'.
-    const isPending = item.sync_status === 'pending'; 
+    // =========================================================
+    // FOOTER
+    // =========================================================
 
-    return (
+    const renderFooter = () => {
+        if (!loadingMore) {
+            return null;
+        }
+
+        return (
+            <View style={styles.loadingMore}>
+                <ActivityIndicator
+                    size="small"
+                    color={PRIMARY}
+                />
+            </View>
+        );
+    };
+
+    // =========================================================
+    // ITEM
+    // =========================================================
+
+    const renderItem = ({
+        item
+    }) => {
+        const dataFormatada =
+            item.data
+                ? format(
+                    parseISO(item.data),
+                    'dd/MM/yyyy',
+                    {
+                        locale: ptBR
+                    }
+                )
+                : 'S/ Data';
+
+        const ano =
+            item.data
+                ? String(
+                    item.data
+                ).substring(0, 4)
+                : '----';
+
+        const numero =
+            `S${String(item.id)
+                .padStart(4, '0')}/${ano}`;
+
+        return (
             <TouchableOpacity
-                style={styles.card}
+                style={
+                    styles.itemContainer
+                }
                 activeOpacity={0.8}
-                onPress={() => navigation.navigate('EditarRelatorioQualidade', { id: item.id, numero: numeroFormatado })}
+                onPress={() =>
+                    navigation.navigate(
+                        'RelatorioForm',
+                        {
+                            id: item.id
+                        }
+                    )
+                }
             >
-                <View style={styles.cardHeader}>
-                    <View style={styles.idBadge}>
-                        <FontAwesome5 name="file-alt" size={12} color={PRIMARY} />
-                        <Text style={styles.idText}>{numeroFormatado}</Text>
-                    </View>
-                    <Text style={styles.dateText}>{formatarData(item.data)}</Text>
+                <View
+                    style={
+                        styles.textContainer
+                    }
+                >
+                    <Text
+                        style={
+                            styles.relatorioTitle
+                        }
+                    >
+                        Relatório Nº {numero}
+                    </Text>
+
+                    <Text
+                        style={
+                            styles.detailText
+                        }
+                    >
+                        Data: {dataFormatada}
+                    </Text>
+
+                    <Text
+                        style={
+                            styles.detailText
+                        }
+                        numberOfLines={1}
+                    >
+                        Cliente: {
+                            item.cliente ||
+                            'Não informado'
+                        }
+                    </Text>
+
+                    <Text
+                        style={
+                            styles.detailText
+                        }
+                        numberOfLines={1}
+                    >
+                        Inspetor: {
+                            item.inspetor ||
+                            'Não informado'
+                        }
+                    </Text>
                 </View>
 
-                <View style={styles.cardBody}>
-                    <View style={styles.infoRow}>
-                        <MaterialIcons name="business" size={16} color="#666" />
-                        <View style={styles.infoContent}>
-                            <Text style={styles.label}>CLIENTE</Text>
-                            <Text style={styles.value} numberOfLines={1}>{item.cliente || 'Não informado'}</Text>
-                        </View>
-                    </View>
-
-                    <View style={[styles.infoRow, { marginTop: 10 }]}>
-                        <MaterialIcons name="person" size={16} color="#666" />
-                        <View style={styles.infoContent}>
-                            <Text style={styles.label}>INSPETOR</Text>
-                            <Text style={styles.value} numberOfLines={1}>{item.inspetor || 'Não atribuído'}</Text>
-                        </View>
-                    </View>
-                </View>
-
-                {/* RODAPÉ COM STATUS DE SINCRONIA */}
-                <View style={styles.cardFooter}>
-                    <View style={styles.syncIndicator}>
-                        <View style={[
-                            styles.statusDot, 
-                            { backgroundColor: isPending ? '#ff9800' : '#4caf50' }
-                        ]} />
-                        <Text style={[
-                            styles.syncText, 
-                            { color: isPending ? '#ff9800' : '#4caf50' }
-                        ]}>
-                            {isPending ? 'Pendente' : 'Sincronizado'}
-                        </Text>
-                    </View>
-                    <MaterialIcons name="arrow-forward-ios" size={14} color="#CCC" />
-                </View>
+                <MaterialIcons
+                    name="chevron-right"
+                    size={30}
+                    color={PRIMARY}
+                />
             </TouchableOpacity>
         );
     };
-    return (
-        <SafeAreaView style={styles.container}>
-            {loading && page === 1 ? (
-                <View style={styles.center}>
-                    <ActivityIndicator size="large" color={PRIMARY} />
-                    <Text style={{marginTop: 10, color: '#666'}}>Buscando relatórios...</Text>
-                </View>
-            ) : (
-                <FlatList
-                    data={relatorios}
-                    keyExtractor={(item) => item.id.toString()}
-                    renderItem={renderItem}
-                    onEndReached={handleLoadMore}
-                    onEndReachedThreshold={0.3}
-                    contentContainerStyle={styles.listContent}
-                    refreshControl={
-                        <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[PRIMARY]} />
-                    }
-                    ListEmptyComponent={
-                        <View style={styles.center}>
-                            <MaterialIcons name="insert-drive-file" size={50} color="#CCC" />
-                            <Text style={styles.emptyText}>Nenhum relatório encontrado.</Text>
-                        </View>
-                    }
-                    ListFooterComponent={() => loadingMore ? <ActivityIndicator style={{ margin: 20 }} color={PRIMARY} /> : null}
-                />
-            )}
 
-            <TouchableOpacity 
-                style={styles.fab} 
-                onPress={() => navigation.navigate('CriarRelatorioQualidade')}
-                activeOpacity={0.8}
+    // =========================================================
+    // RENDER
+    // =========================================================
+
+    return (
+        <View
+            style={
+                styles.container
+            }
+        >
+            {/* BUSCA */}
+
+            <View
+                style={
+                    styles.searchContainer
+                }
             >
-                <MaterialIcons name="add" size={30} color="white" />
+                <MaterialIcons
+                    name="search"
+                    size={24}
+                    color="#666"
+                    style={
+                        styles.searchIcon
+                    }
+                />
+
+                <TextInput
+                    style={
+                        styles.searchInput
+                    }
+                    placeholder="Pesquisar relatório..."
+                    value={searchText}
+                    onChangeText={
+                        setSearchText
+                    }
+                    clearButtonMode="while-editing"
+                />
+            </View>
+
+            {/* LISTA */}
+
+            <FlatList
+                data={relatorios}
+
+                renderItem={
+                    renderItem
+                }
+
+                keyExtractor={
+                    item =>
+                        String(item.id)
+                }
+
+                contentContainerStyle={
+                    styles.listContent
+                }
+
+                onEndReached={
+                    handleLoadMore
+                }
+
+                onEndReachedThreshold={
+                    0.3
+                }
+
+                ListFooterComponent={
+                    renderFooter
+                }
+
+                refreshing={
+                    isRefreshing
+                }
+
+                onRefresh={
+                    handleRefresh
+                }
+
+                ListEmptyComponent={() =>
+                    !loading ? (
+                        <Text
+                            style={
+                                styles.emptyText
+                            }
+                        >
+                            Nenhum relatório encontrado.
+                        </Text>
+                    ) : null
+                }
+            />
+
+            {/* FAB */}
+
+            <TouchableOpacity
+                style={
+                    styles.fab
+                }
+                onPress={() =>
+                    navigation.navigate(
+                        'RelatorioForm'
+                    )
+                }
+            >
+                <MaterialIcons
+                    name="add"
+                    size={28}
+                    color="#fff"
+                />
             </TouchableOpacity>
-        </SafeAreaView>
+        </View>
     );
 }
 
+// =========================================================
+// STYLES
+// =========================================================
+
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F0F2F5' }, // Fundo cinza suave
-    center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    listContent: { padding: 12, paddingBottom: 100 },
-    card: { 
-        backgroundColor: '#FFF', 
-        borderRadius: 12, 
-        padding: 16, 
-        marginBottom: 12, 
-        elevation: 4,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
+    container: {
+        flex: 1,
+        backgroundColor: '#f5f5f5',
     },
-    cardHeader: { 
-        flexDirection: 'row', 
-        justifyContent: 'space-between', 
-        alignItems: 'center',
-        borderBottomWidth: 1,
-        borderBottomColor: '#F0F0F0',
-        paddingBottom: 10,
-        marginBottom: 12 
-    },
-    idBadge: { 
+
+    searchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: SECONDARY, 
-        paddingHorizontal: 10, 
-        paddingVertical: 5, 
-        borderRadius: 6 
+        backgroundColor: '#fff',
+        margin: 12,
+        marginBottom: 6,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#ddd',
+        paddingHorizontal: 10,
     },
-    idText: { color: PRIMARY, fontWeight: 'bold', fontSize: 13, marginLeft: 6 },
-    dateText: { color: '#666', fontSize: 13, fontWeight: '500' },
-    cardBody: { marginBottom: 8 },
-    infoRow: { flexDirection: 'row', alignItems: 'flex-start' },
-    infoContent: { marginLeft: 10, flex: 1 },
-    label: { color: '#9E9E9E', fontSize: 10, fontWeight: 'bold', letterSpacing: 0.5 },
-    value: { color: '#333', fontSize: 15, fontWeight: '600', marginTop: 1 },
-    cardFooter: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        borderTopWidth: 1,
-        borderTopColor: '#F0F0F0',
-        paddingTop: 10,
-        marginTop: 5
-    },
-    syncIndicator: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    statusDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
+
+    searchIcon: {
         marginRight: 6,
     },
-    syncText: {
-        fontSize: 11,
-        fontWeight: 'bold',
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
+
+    searchInput: {
+        flex: 1,
+        height: 46,
+        fontSize: 15,
+        color: '#333',
     },
-    footerDetail: { fontSize: 11, color: '#BBB', fontStyle: 'italic' },
-    fab: { 
-        position: 'absolute', 
-        right: 20, 
-        bottom: 25, 
-        backgroundColor: PRIMARY, 
-        width: 60, 
-        height: 60, 
-        borderRadius: 30, 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        elevation: 8,
+
+    listContent: {
+        padding: 12,
+        paddingTop: 6,
+        paddingBottom: 90,
+    },
+
+    itemContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        borderRadius: 8,
+        padding: 14,
+        marginBottom: 10,
+
+        elevation: 2,
+
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 5
+        shadowOpacity: 0.05,
+        shadowRadius: 3,
+        shadowOffset: {
+            width: 0,
+            height: 1
+        },
     },
-    emptyText: { textAlign: 'center', color: '#999', fontSize: 16, marginTop: 10 }
+
+    textContainer: {
+        flex: 1,
+    },
+
+    relatorioTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: PRIMARY,
+        marginBottom: 5,
+    },
+
+    detailText: {
+        fontSize: 13,
+        color: '#666',
+        marginTop: 2,
+    },
+
+    emptyText: {
+        textAlign: 'center',
+        color: '#777',
+        marginTop: 40,
+        fontSize: 14,
+    },
+
+    loadingMore: {
+        paddingVertical: 20,
+    },
+
+    fab: {
+        position: 'absolute',
+        right: 20,
+        bottom: 20,
+        width: 58,
+        height: 58,
+        borderRadius: 29,
+        backgroundColor: PRIMARY,
+        alignItems: 'center',
+        justifyContent: 'center',
+        elevation: 6,
+    },
 });

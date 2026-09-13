@@ -1,52 +1,55 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { listarASs, buscarASsNaAPI } from '../../services/asService'; 
+import { listarASs } from '../../services/asService';
 import { MaterialIcons } from '@expo/vector-icons';
-import { format, parseISO } from 'date-fns'; 
+import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 export default function ASListScreen() {
     const navigation = useNavigation();
+
     const [ass, setASs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
-    
-    // --- ESTADOS PARA BUSCA E PAGINAÇÃO ---
-    const [searchText, setSearchText] = useState(""); 
+
+    const [searchText, setSearchText] = useState('');
     const [page, setPage] = useState(1);
     const [loadingMore, setLoadingMore] = useState(false);
-    const [hasMore, setHasMore] = useState(true);
-    const PAGE_SIZE = 15;
+    const [hasMore, setHasMore] = useState(false);
 
     const fetchASs = async (pageNum = 1, shouldRefresh = false) => {
-        if (pageNum > 1) setLoadingMore(true);
-        
+        if (pageNum > 1) {
+            setLoadingMore(true);
+        } else {
+            setHasMore(false);
+        }
+
         try {
-            // 1. Se tem busca e é a primeira página, tenta baixar da API primeiro
-            if (searchText.length > 0 && pageNum === 1) {
-                console.log("🔍 Buscando ASs na API por:", searchText);
-                await buscarASsNaAPI(searchText); 
-            }
+            console.log(`🌐 Buscando ASs na API - página ${pageNum} - busca "${searchText}"`);
 
-            // 2. Busca no SQLite local (Padrão de performance)
-            const data = await listarASs(pageNum, PAGE_SIZE, searchText);
-            
-            console.log(`📊 SQLite retornou ${data.length} ASs para a busca.`);
+            const response = await listarASs({
+                page: pageNum,
+                search: searchText,
+            });
 
-            if (data.length < PAGE_SIZE) {
-                setHasMore(false);
-            } else {
-                setHasMore(true);
-            }
+            const data = response.results || [];
+
+            console.log(`📡 API retornou ${data.length} AS(s). Total: ${response.count ?? 'N/A'}`);
+
+            setHasMore(Boolean(response.next));
 
             if (shouldRefresh || pageNum === 1) {
                 setASs(data);
             } else {
                 setASs(prev => [...prev, ...data]);
             }
+
         } catch (error) {
-            console.error('Erro ao buscar lista de ASs:', error);
+            console.error(
+                '❌ Erro ao buscar lista de ASs:',
+                error.response?.data || error.message
+            );
         } finally {
             setLoading(false);
             setLoadingMore(false);
@@ -54,22 +57,22 @@ export default function ASListScreen() {
         }
     };
 
-    // Recarrega ao ganhar foco (sem busca ativa)
     useFocusEffect(
         useCallback(() => {
-            if (searchText === "") {
+            if (searchText === '') {
                 setPage(1);
+                setHasMore(false);
                 fetchASs(1, true);
             }
         }, [])
     );
 
-    // Debounce para a barra de pesquisa
     useEffect(() => {
-        if (searchText === "") return;
+        if (searchText === '') return;
 
         const delayDebounce = setTimeout(() => {
             setPage(1);
+            setHasMore(false);
             fetchASs(1, true);
         }, 800);
 
@@ -79,19 +82,21 @@ export default function ASListScreen() {
     const handleRefresh = () => {
         setIsRefreshing(true);
         setPage(1);
+        setHasMore(false);
         fetchASs(1, true);
     };
 
     const handleLoadMore = () => {
-        if (!loadingMore && hasMore && !loading) {
-            const nextPage = page + 1;
-            setPage(nextPage);
-            fetchASs(nextPage);
-        }
+        if (loadingMore || loading || !hasMore) return;
+
+        const nextPage = page + 1;
+        setPage(nextPage);
+        fetchASs(nextPage);
     };
 
     const renderFooter = () => {
         if (!loadingMore) return null;
+
         return (
             <View style={styles.loadingMore}>
                 <ActivityIndicator size="small" color="#00315c" />
@@ -100,35 +105,36 @@ export default function ASListScreen() {
     };
 
     const renderItem = ({ item }) => {
-        // Define a cor baseada no status de sincronização
-        const isPending = item.sync_status === 'pending' || item.sync_status === 'update_pending';
-        const syncColor = isPending ? '#ffc107' : '#28a745';
-        
-        // Formata a data com segurança
         let asData = 'S/ Data';
+
         try {
             if (item.data) {
                 asData = format(parseISO(item.data), 'dd/MM/yyyy', { locale: ptBR });
             }
-        } catch (e) { console.warn("Erro data AS:", e); }
+        } catch (e) {
+            console.warn('Erro data AS:', e);
+        }
 
         return (
-            <TouchableOpacity 
-                style={[styles.itemContainer, { borderLeftColor: syncColor }]} 
+            <TouchableOpacity
+                style={styles.itemContainer}
                 onPress={() => navigation.navigate('ASForm', { id: item.id })}
                 activeOpacity={0.8}
             >
                 <View style={styles.textContainer}>
                     <Text style={styles.asTitle}>
-                        AS Nº {item.as_sap || String(item.server_id || item.id).padStart(5, '0')}
-                    </Text> 
-                    <Text style={styles.detailText}>Data: {asData} | Local: {item.local || 'N/A'}</Text>
-                    <Text style={styles.detailText}>Status: {item.status_as || 'Pendente'}</Text>
-                    
-                    <Text style={[styles.syncStatusText, { color: syncColor }]}>
-                        {isPending ? '🟡 Alterações Pendentes' : '🟢 Sincronizado'}
+                        AS Nº {item.as_sap || String(item.id).padStart(5, '0')}
+                    </Text>
+
+                    <Text style={styles.detailText}>
+                        Data: {asData} | Local: {item.local || 'N/A'}
+                    </Text>
+
+                    <Text style={styles.detailText}>
+                        Status: {item.status_as || 'Pendente'}
                     </Text>
                 </View>
+
                 <MaterialIcons name="chevron-right" size={30} color="#00315c" />
             </TouchableOpacity>
         );
@@ -136,9 +142,9 @@ export default function ASListScreen() {
 
     return (
         <View style={styles.container}>
-            {/* BARRA DE PESQUISA */}
             <View style={styles.searchContainer}>
                 <MaterialIcons name="search" size={24} color="#666" style={styles.searchIcon} />
+
                 <TextInput
                     style={styles.searchInput}
                     placeholder="Pesquisar por Local, OS ou ID..."
@@ -151,22 +157,19 @@ export default function ASListScreen() {
             <FlatList
                 data={ass}
                 renderItem={renderItem}
-                keyExtractor={(item) => item.id.toString()}
+                keyExtractor={item => item.id.toString()}
                 contentContainerStyle={styles.listContent}
                 onEndReached={handleLoadMore}
                 onEndReachedThreshold={0.3}
                 ListFooterComponent={renderFooter}
                 refreshing={isRefreshing}
                 onRefresh={handleRefresh}
-                ListEmptyComponent={() => (
+                ListEmptyComponent={() =>
                     !loading && <Text style={styles.emptyText}>Nenhuma AS encontrada.</Text>
-                )}
+                }
             />
-            
-            <TouchableOpacity 
-                style={styles.fab} 
-                onPress={() => navigation.navigate('ASForm')}
-            >
+
+            <TouchableOpacity style={styles.fab} onPress={() => navigation.navigate('ASForm')}>
                 <MaterialIcons name="add" size={28} color="white" />
             </TouchableOpacity>
         </View>

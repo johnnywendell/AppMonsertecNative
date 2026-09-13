@@ -1,62 +1,69 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput } from 'react-native';
+import {
+    View, Text, StyleSheet, FlatList,
+    TouchableOpacity, ActivityIndicator, TextInput
+} from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { listarBoletinsMedicao, buscarBoletinsNaAPI } from '../../services/boletimMedicaoService'; 
+import { listarBoletinsMedicao } from '../../services/boletimMedicaoService';
 import { MaterialIcons } from '@expo/vector-icons';
 
-// Função auxiliar para formatar datas
 const formatPeriodo = (dateString) => {
     if (!dateString) return 'S/ Data';
+
     try {
         const [year, month, day] = dateString.split('-');
         return `${day}/${month}/${year}`;
-    } catch (e) {
+    } catch {
         return dateString;
     }
 };
 
 export default function BoletimMedicaoListScreen() {
     const navigation = useNavigation();
+
     const [bms, setBMs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
-    
-    // --- ESTADOS PARA BUSCA E PAGINAÇÃO ---
-    const [searchText, setSearchText] = useState(""); 
+
+    const [searchText, setSearchText] = useState('');
     const [page, setPage] = useState(1);
     const [loadingMore, setLoadingMore] = useState(false);
-    const [hasMore, setHasMore] = useState(true);
-    const PAGE_SIZE = 15;
+    const [hasMore, setHasMore] = useState(false);
 
     const fetchBMs = async (pageNum = 1, shouldRefresh = false) => {
-        if (pageNum > 1) setLoadingMore(true);
-        
+        if (pageNum > 1) {
+            setLoadingMore(true);
+        } else {
+            setHasMore(false);
+        }
+
         try {
-            // 1. Se tem busca e é a primeira página, tenta buscar no servidor primeiro
-            if (searchText.length > 0 && pageNum === 1) {
-                console.log("🔍 Buscando BMs na API por:", searchText);
-                await buscarBoletinsNaAPI(searchText); 
-            }
+            console.log(`🌐 Buscando BMs na API - página ${pageNum} - busca "${searchText}"`);
 
-            // 2. Busca no SQLite local (Padrão de performance offline-first)
-            const data = await listarBoletinsMedicao(pageNum, PAGE_SIZE, searchText);
-            
-            console.log(`📊 SQLite retornou ${data.length} BMs.`);
+            const response = await listarBoletinsMedicao({
+                page: pageNum,
+                search: searchText,
+            });
 
-            // Verifica se ainda há mais páginas para carregar
-            if (data.length < PAGE_SIZE) {
-                setHasMore(false);
-            } else {
-                setHasMore(true);
-            }
+            const data = response.results || [];
+
+            console.log(
+                `📡 API retornou ${data.length} BM(s). Total: ${response.count ?? 'N/A'}`
+            );
+
+            setHasMore(Boolean(response.next));
 
             if (shouldRefresh || pageNum === 1) {
                 setBMs(data);
             } else {
                 setBMs(prev => [...prev, ...data]);
             }
+
         } catch (error) {
-            console.error('Erro ao buscar lista de BMs:', error);
+            console.error(
+                '❌ Erro ao buscar lista de BMs:',
+                error.response?.data || error.message
+            );
         } finally {
             setLoading(false);
             setLoadingMore(false);
@@ -64,22 +71,22 @@ export default function BoletimMedicaoListScreen() {
         }
     };
 
-    // Recarrega ao ganhar foco (apenas se não estiver pesquisando)
     useFocusEffect(
         useCallback(() => {
-            if (searchText === "") {
+            if (searchText === '') {
                 setPage(1);
+                setHasMore(false);
                 fetchBMs(1, true);
             }
         }, [])
     );
 
-    // Debounce para a barra de pesquisa (evita chamadas excessivas)
     useEffect(() => {
-        if (searchText === "") return;
+        if (searchText === '') return;
 
         const delayDebounce = setTimeout(() => {
             setPage(1);
+            setHasMore(false);
             fetchBMs(1, true);
         }, 800);
 
@@ -89,19 +96,21 @@ export default function BoletimMedicaoListScreen() {
     const handleRefresh = () => {
         setIsRefreshing(true);
         setPage(1);
+        setHasMore(false);
         fetchBMs(1, true);
     };
 
     const handleLoadMore = () => {
-        if (!loadingMore && hasMore && !loading) {
-            const nextPage = page + 1;
-            setPage(nextPage);
-            fetchBMs(nextPage);
-        }
+        if (loadingMore || loading || !hasMore) return;
+
+        const nextPage = page + 1;
+        setPage(nextPage);
+        fetchBMs(nextPage);
     };
 
     const renderFooter = () => {
         if (!loadingMore) return null;
+
         return (
             <View style={styles.loadingMore}>
                 <ActivityIndicator size="small" color="#00315c" />
@@ -110,28 +119,28 @@ export default function BoletimMedicaoListScreen() {
     };
 
     const renderItem = ({ item }) => {
-        const isPending = item.sync_status === 'pending' || item.sync_status === 'update_pending';
-        const syncColor = isPending ? '#ffc107' : '#28a745';
-
         return (
-            <TouchableOpacity 
-                style={[styles.itemContainer, { borderLeftColor: syncColor }]} 
-                onPress={() => navigation.navigate('BoletimMedicaoForm', { id: item.id })}
+            <TouchableOpacity
+                style={styles.itemContainer}
+                onPress={() =>
+                    navigation.navigate('BoletimMedicaoForm', { id: item.id })
+                }
                 activeOpacity={0.8}
             >
                 <View style={styles.textContainer}>
                     <Text style={styles.title}>
-                        BM Nº {item.server_id || 'LOCAL'} - {formatPeriodo(item.periodo_inicio)}
-                    </Text> 
-                    <Text style={styles.subtitle}>Status: {item.b_status || 'EM LANÇAMENTO'}</Text>
+                        BM Nº {String(item.id).padStart(5, '0')} - {formatPeriodo(item.periodo_inicio)}
+                    </Text>
+
+                    <Text style={styles.subtitle}>
+                        Status: {item.b_status || 'EM LANÇAMENTO'}
+                    </Text>
+
                     <Text style={styles.subtitle} numberOfLines={1}>
                         Descrição: {item.descricao || 'Sem descrição'}
                     </Text>
-                    
-                    <Text style={[styles.syncStatusText, { color: syncColor }]}>
-                        {isPending ? '🟡 Alterações Pendentes' : '🟢 Sincronizado'}
-                    </Text>
                 </View>
+
                 <MaterialIcons name="chevron-right" size={30} color="#00315c" />
             </TouchableOpacity>
         );
@@ -139,9 +148,14 @@ export default function BoletimMedicaoListScreen() {
 
     return (
         <View style={styles.container}>
-            {/* BARRA DE PESQUISA */}
             <View style={styles.searchContainer}>
-                <MaterialIcons name="search" size={24} color="#666" style={styles.searchIcon} />
+                <MaterialIcons
+                    name="search"
+                    size={24}
+                    color="#666"
+                    style={styles.searchIcon}
+                />
+
                 <TextInput
                     style={styles.searchInput}
                     placeholder="Pesquisar por Descrição, Nº ou ID..."
@@ -161,13 +175,17 @@ export default function BoletimMedicaoListScreen() {
                 ListFooterComponent={renderFooter}
                 refreshing={isRefreshing}
                 onRefresh={handleRefresh}
-                ListEmptyComponent={() => (
-                    !loading && <Text style={styles.emptyText}>Nenhum boletim encontrado.</Text>
-                )}
+                ListEmptyComponent={() =>
+                    !loading && (
+                        <Text style={styles.emptyText}>
+                            Nenhum boletim encontrado.
+                        </Text>
+                    )
+                }
             />
-            
-            <TouchableOpacity 
-                style={styles.fab} 
+
+            <TouchableOpacity
+                style={styles.fab}
                 onPress={() => navigation.navigate('BoletimMedicaoForm')}
             >
                 <MaterialIcons name="add" size={28} color="white" />

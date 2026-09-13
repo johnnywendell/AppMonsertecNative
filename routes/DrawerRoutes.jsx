@@ -6,7 +6,6 @@ import { useNavigation } from '@react-navigation/native';
 import { logout } from '../services/authService';
 import MessageModal from '../components/MessageModal';
 import RecursosHumanosStack from '../stack/RecursosHumanosStack.jsx';
-import MedicaoStack from '../stack/MedicaoStack.jsx';
 import QualidadeStack from '../stack/QualidadeStack.jsx';
 import CadastrosGeraisStack from '../stack/CadastrosGeraisStack.jsx';
 import PlanejamentoStack from '../stack/PlanejamentoStack.jsx';
@@ -87,16 +86,6 @@ const DrawerRoutes = () => {
                         ),
                     }}
                 />
-                {/* <Drawer.Screen
-                    name="Medicao"
-                    component={MedicaoStack}
-                    options={{
-                        drawerLabel: 'Medição',
-                        drawerIcon: ({ color, size }) => (
-                            <MaterialIcons name="event-note" size={size} color={color} />
-                        ),
-                    }}
-                /> */}
                 <Drawer.Group screenOptions={{ drawerLabel: 'Qualidade' }}>
                     <Drawer.Screen
                         name="Relatorios"

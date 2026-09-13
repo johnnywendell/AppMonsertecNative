@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { listarRDCs, buscarRDCsNaAPI } from '../../services/rdcService'; 
+import { listarRDCs } from '../../services/rdcService';
 import { MaterialIcons } from '@expo/vector-icons';
 import { format, parseISO } from 'date-fns'; 
 import { ptBR } from 'date-fns/locale';
@@ -16,43 +16,61 @@ export default function RdcListScreen() {
     const [searchText, setSearchText] = useState(""); // Novo estado para busca
     const [page, setPage] = useState(1);
     const [loadingMore, setLoadingMore] = useState(false);
-    const [hasMore, setHasMore] = useState(true);
-    const PAGE_SIZE = 15;
+    const [hasMore, setHasMore] = useState(false);
 
-    const fetchRdcs = async (pageNum = 1, shouldRefresh = false) => {
-        if (pageNum > 1) setLoadingMore(true);
-        
-        try {
-            // Se tem texto de busca e é a primeira página, força o download da API
-            if (searchText.length > 0 && pageNum === 1) {
-                console.log("🔍 Buscando na API por:", searchText);
-                await buscarRDCsNaAPI(searchText); 
-            }
 
-            // Agora busca no SQLite (que já contém o que veio da API + o que já estava lá)
-            const data = await listarRDCs(pageNum, PAGE_SIZE, searchText);
-            
-            console.log(`📊 SQLite retornou ${data.length} itens para a busca.`);
+    const fetchRdcs = async (
+            pageNum = 1,
+            shouldRefresh = false
+        ) => {
 
-            if (data.length < PAGE_SIZE) {
+            if (pageNum > 1) {
+                setLoadingMore(true);
+            } else {
+                // Enquanto carrega a primeira página,
+                // impede o FlatList de tentar página 2 prematuramente
                 setHasMore(false);
-            } else {
-                setHasMore(true);
             }
 
-            if (shouldRefresh || pageNum === 1) {
-                setRdcs(data);
-            } else {
-                setRdcs(prev => [...prev, ...data]);
+            try {
+
+                const response = await listarRDCs({
+                    page: pageNum,
+                    search: searchText,
+                });
+
+                const data = response.results || [];
+
+                console.log(
+                    `📡 API retornou ${data.length} RDC(s). Total: ${response.count ?? 'N/A'}`
+                );
+
+                // O próprio DRF informa se existe próxima página
+                setHasMore(Boolean(response.next));
+
+                if (shouldRefresh || pageNum === 1) {
+                    setRdcs(data);
+                } else {
+                    setRdcs(prev => [
+                        ...prev,
+                        ...data,
+                    ]);
+                }
+
+            } catch (error) {
+
+                console.error(
+                    '❌ Erro ao buscar lista de RDCs:',
+                    error.response?.data || error.message
+                );
+
+            } finally {
+
+                setLoading(false);
+                setLoadingMore(false);
+                setIsRefreshing(false);
             }
-        } catch (error) {
-            console.error('Erro ao buscar lista de RDCs:', error);
-        } finally {
-            setLoading(false);
-            setLoadingMore(false);
-            setIsRefreshing(false);
-        }
-    };
+        };
 
     // Efeito para disparar a busca quando o usuário digita (Debounce simples)
     useFocusEffect(
@@ -84,11 +102,15 @@ export default function RdcListScreen() {
     };
 
     const handleLoadMore = () => {
-        if (!loadingMore && hasMore) {
-            const nextPage = page + 1;
-            setPage(nextPage);
-            fetchRdcs(nextPage);
+
+        if (loadingMore || !hasMore) {
+            return;
         }
+
+        const nextPage = page + 1;
+
+        setPage(nextPage);
+        fetchRdcs(nextPage);
     };
 
     // --- RENDERIZAÇÃO ---
@@ -102,26 +124,46 @@ export default function RdcListScreen() {
     };
 
     const renderItem = ({ item }) => {
-        const syncColor = item.sync_status === 'pending' ? '#ffc107' : '#28a745';
-        let rdcData = item.data ? format(parseISO(item.data), 'dd/MM/yyyy', { locale: ptBR }) : 'S/ Data';
+            let rdcData = item.data
+                ? format(
+                    parseISO(item.data),
+                    'dd/MM/yyyy',
+                    { locale: ptBR }
+                )
+                : 'S/ Data';
 
-        return (
-            <TouchableOpacity 
-                style={[styles.itemContainer, { borderLeftColor: syncColor }]} 
-                onPress={() => navigation.navigate('RdcForm', { id: item.id })}
-                activeOpacity={0.8}
-            >
-                <View style={styles.textContainer}>
-                    <Text style={styles.rdcTitle}>RDC N° {String(item.server_id || item.id).padStart(5, '0')}</Text> 
-                    <Text style={styles.detailText}>Data: {rdcData} | Local: {item.local}</Text>
-                    <Text style={[styles.syncStatusText, { color: syncColor }]}>
-                        {item.sync_status === 'pending' ? '🟡 Pendente' : '🟢 Sincronizado'}
-                    </Text>
-                </View>
-                <MaterialIcons name="chevron-right" size={30} color="#00315c" />
-            </TouchableOpacity>
-        );
-    };
+            return (
+                <TouchableOpacity
+                    style={styles.itemContainer}
+                    onPress={() =>
+                        navigation.navigate(
+                            'RdcForm',
+                            { id: item.id }
+                        )
+                    }
+                    activeOpacity={0.8}
+                >
+                    <View style={styles.textContainer}>
+
+                        <Text style={styles.rdcTitle}>
+                            RDC N° {String(item.id).padStart(5, '0')}
+                        </Text>
+
+                        <Text style={styles.detailText}>
+                            Data: {rdcData} | Local: {item.local}
+                        </Text>
+
+                    </View>
+
+                    <MaterialIcons
+                        name="chevron-right"
+                        size={30}
+                        color="#00315c"
+                    />
+
+                </TouchableOpacity>
+            );
+        };
 
     return (
         <View style={styles.container}>

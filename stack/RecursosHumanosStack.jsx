@@ -2,8 +2,8 @@ import React from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
 
 import RecursosHumanosScreen from '../screens/RecursosHumanosScreen.jsx';
-import EditarApontamentosScreen from '../screens/EditarApontamentosScreen.jsx';
-import CriarApontamentoScreen from '../screens/CriarApontamentoScreen.jsx';
+
+import ApontamentoFormScreen from '../screens/ApontamentoFormScreen.jsx';
 
 const Stack = createStackNavigator();
 
@@ -15,16 +15,13 @@ export default function RecursosHumanosStack() {
         component={RecursosHumanosScreen}
         options={{ title: 'Apontamentos' }}
       />
-      <Stack.Screen
-        name="EditarApontamentosScreen"
-        component={EditarApontamentosScreen}
-        options={({ route }) => ({ title: `Editar Apontamento ${route.params.numero}` })}
-      />
-      <Stack.Screen
-        name="CriarApontamentoScreen"
-        component={CriarApontamentoScreen}
-        options={{ title: 'Criar Apontamento' }}
-      />
+    <Stack.Screen
+        name="ApontamentoForm"
+        component={ApontamentoFormScreen}
+        options={({ route }) => ({
+        title: route?.params?.id ? 'Editar Apontamento' : 'Novo Apontamento'
+        })}
+    />
     </Stack.Navigator>
   );
 }

@@ -10,6 +10,11 @@ import LoginScreen from './screens/LoginScreen';
 import DrawerRoutes from './routes/DrawerRoutes';
 import { setupAxiosInterceptors } from './services/authService';
 import { LogBox } from 'react-native';
+import { syncPendingOperations } from './services/syncService2';
+import NetInfo from '@react-native-community/netinfo';
+
+
+
 
 // Ignorar mensagens específicas
 LogBox.ignoreLogs([
@@ -25,6 +30,29 @@ export default function App() {
         dbStatus: 'Inicializando...',
     });
 
+     useEffect(() => {
+        const unsubscribe = NetInfo.addEventListener(state => {
+            if (
+                state.isConnected &&
+                state.isInternetReachable !== false
+            ) {
+                console.log('🌐 Conexão disponível. Verificando fila offline...');
+
+                syncPendingOperations().catch(error => {
+                    console.error(
+                        'Erro ao sincronizar operações pendentes:',
+                        error
+                    );
+                });
+            }
+        });
+
+        return () => {
+            unsubscribe();
+        };
+    }, []);
+    
+
     useEffect(() => {
         const initApp = async () => {
             try {
@@ -36,11 +64,9 @@ export default function App() {
 
                 const { setupDatabase, checkDatabaseHealth, resetDatabase } = await import('./database');
                 
-                // >>> CHAMADA TEMPORÁRIA PARA RESETAR O BANCO <<<
-                // REMOVA OU COMENTE ESTA LINHA APÓS O AJUSTE NA TABELA COLABORADORES
-                //console.warn('!!! AVISO: BANCO DE DADOS SERÁ RESETADO (PERDA TOTAL DE DADOS) !!!');
-                //await resetDatabase();
-                // >>> FIM DA CHAMADA TEMPORÁRIA <<<
+                // >Pra resetar, comente pra persistir
+                console.warn('!!! AVISO: BANCO DE DADOS SERÁ RESETADO (PERDA TOTAL DE DADOS) !!!');
+                await resetDatabase();
                 
                 await setupDatabase();
 
@@ -53,16 +79,7 @@ export default function App() {
 
                 setAppState(prev => ({ ...prev, dbStatus: 'Testando operações...' }));
 
-                const { diagnosticarBanco } = await import('./services/medicaoService');
-                const diagnostico = await diagnosticarBanco();
-                console.log('Diagnóstico do banco:', diagnostico);
-
-                if (diagnostico.error) {
-                    throw new Error(`Erro no banco: ${diagnostico.error}`);
-                }
-
                 console.log('=== INICIALIZAÇÃO CONCLUÍDA COM SUCESSO ===');
-                console.log(`Banco contém ${diagnostico.recordCount} registros`);
 
                 setAppState({
                     loading: false,

@@ -87,12 +87,32 @@ export const fetchProjetoCodigos = async () => {
 
 // Colaborador (para ItemMedicaohh)
 export const fetchColaboradores = async () => {
+
     try {
-        const { data } = await api.get('api/v1/efetivo/colaboradores/');
-        return data.map(item => ({ label: item.nome, value: item.id }));
+
+        const { data } =
+            await api.get(
+                'api/v1/efetivo/colaboradores/'
+            );
+
+
+        return data.map(item => ({
+
+            label:
+                `${item.matricula || ''} - ${item.nome}`,
+
+            value:
+                item.id
+        }));
+
     } catch (error) {
-        console.error('Erro ao buscar Colaboradores:', error);
-        throw error;
+
+        console.error(
+            'Erro ao buscar Colaboradores:',
+            error
+        );
+
+        return [];
     }
 };
 
@@ -112,7 +132,7 @@ export const fetchItemContratoOptions = async () => {
 // --- MOCK para Choices (Ainda não é fetch, mas necessário para o Forms) ---
 export const MOCK_OPTIONS_CHOICES = {
     tipo: [{ label: 'MONTAGEM', value: 'MONTAGEM' }, { label: 'MANUTENÇÃO', value: 'MANUTENÇÃO' }],
-    disciplina: [{ label: 'PINTURA', value: 'PIN' }, { label: 'MECÂNICA', value: 'MEC' }],
+    disciplina: [{ label: 'PINTURA', value: 'PIN' }, { label: 'ANDAIME', value: 'AND' }],
     clima: [{ label: 'Sol', value: 'SOL' }, { label: 'Chuva', value: 'CHUVA' }, { label: 'Nublado', value: 'NUBLADO' }],
     bm: [{ label: 'BM 2024-05', value: 50 }, { label: 'BM 2024-06', value: 51 }], // Assumindo que BM é Choice ou um FK simples sem service dedicado
     tipo_serv_hh: [{ label: 'Interno', value: 'INT' }, { label: 'Externo', value: 'EXT' }],

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { salvarASLocal, buscarAS } from '../../services/asService';
+import { criarAS, editarAS, buscarAS } from '../../services/asService';
 import MessageModal from '../../components/MessageModal';
 import CustomPickerModal from '../../components/CustomPickerModal'; 
 // CORREÇÃO AQUI: Importa DatePicker diretamente do arquivo DatePicker.
@@ -84,13 +84,10 @@ export default function ASFormScreen({ route }) {
     useEffect(() => {
         const loadFormData = async () => {
             try {
-                // 1. Carregar Opções de FKs em paralelo
-                const [
-                    unidades, solicitantes, aprovadores, projetos
-                ] = await Promise.all([
-                    fetchUnidades(), 
-                    fetchSolicitantes(), 
-                    fetchAprovadores(), 
+                const [unidades, solicitantes, aprovadores, projetos] = await Promise.all([
+                    fetchUnidades(),
+                    fetchSolicitantes(),
+                    fetchAprovadores(),
                     fetchProjetoCodigos()
                 ]);
 
@@ -99,13 +96,13 @@ export default function ASFormScreen({ route }) {
                 setAprovadorOptions(aprovadores);
                 setProjetoCodOptions(projetos);
 
-                // 2. Carregar dados da AS para edição
                 if (isEditing) {
                     const asData = await buscarAS(id);
+
                     if (asData) {
-                        setData(asData.data); 
-                        setTipo(asData.tipo);
-                        setDisciplina(asData.disciplina);
+                        setData(asData.data || new Date().toISOString().split('T')[0]);
+                        setTipo(asData.tipo || TIPO_OPTIONS[0].value);
+                        setDisciplina(asData.disciplina || DISCIP_OPTIONS[0].value);
                         setEscopo(asData.escopo || '');
                         setLocal(asData.local || '');
                         setObs(asData.obs || '');
@@ -113,27 +110,31 @@ export default function ASFormScreen({ route }) {
                         setASAntiga(asData.as_antiga || '');
                         setStatusAs(asData.status_as || 'EM ELABORAÇÃO');
 
-                        // Mapear server_id para os estados
-                        setUnidadeId(asData.unidade_server_id);
-                        setSolicitanteId(asData.solicitante_server_id);
-                        setAprovadorId(asData.aprovador_server_id);
-                        setProjetoCodId(asData.projeto_cod_server_id);
+                        setUnidadeId(asData.unidade?.id || asData.unidade || null);
+                        setSolicitanteId(asData.solicitante?.id || asData.solicitante || null);
+                        setAprovadorId(asData.aprovador?.id || asData.aprovador || null);
+                        setProjetoCodId(asData.projeto_cod?.id || asData.projeto_cod || null);
                     }
                 } else {
-                    if (TIPO_OPTIONS.length > 0) setTipo(TIPO_OPTIONS[0].value);
-                    if (DISCIP_OPTIONS.length > 0) setDisciplina(DISCIP_OPTIONS[0].value);
+                    setTipo(TIPO_OPTIONS[0].value);
+                    setDisciplina(DISCIP_OPTIONS[0].value);
                 }
+
             } catch (error) {
-                console.error('Erro ao carregar dados do formulário:', error);
-                setModalMessage('Não foi possível carregar as opções de seleção.');
+                console.error(
+                    'Erro ao carregar dados do formulário:',
+                    error.response?.data || error.message
+                );
+
+                setModalMessage('Não foi possível carregar os dados do formulário.');
                 setModalVisible(true);
             } finally {
                 setLoading(false);
             }
         };
+
         loadFormData();
     }, [id, isEditing]);
-
 
     const handleSave = async () => {
         if (!data || !tipo || !disciplina || !solicitanteId || !unidadeId) {
@@ -145,33 +146,60 @@ export default function ASFormScreen({ route }) {
         setLoading(true);
 
         const dadosParaSalvar = {
-            id: isEditing ? id : null,
-            data, 
+            data,
             tipo,
             disciplina,
-            escopo,
-            local,
-            obs,
-            rev: 0, 
-            as_sap: asSap,
-            as_antiga: asAntiga,
+            escopo: escopo || null,
+            local: local || null,
+            obs: obs || null,
+            rev: 0,
+            as_sap: asSap || null,
+            as_antiga: asAntiga || null,
             status_as: statusAs,
-            
-            // FKs (Server IDs)
-            unidade_server_id: unidadeId,
-            solicitante_server_id: solicitanteId,
-            aprovador_server_id: aprovadorId,
-            projeto_cod_server_id: projetoCodId,
+
+            unidade: unidadeId,
+            solicitante: solicitanteId,
+            aprovador: aprovadorId || null,
+            projeto_cod: projetoCodId || null,
         };
 
         try {
-            await salvarASLocal(dadosParaSalvar);
-            setModalMessage(`AS ${isEditing ? 'atualizada' : 'criada'} e marcada para sincronização!`);
-            setNavigateOnClose(true); 
+            if (isEditing) {
+                await editarAS(id, dadosParaSalvar);
+
+                setModalMessage('AS atualizada com sucesso!');
+            } else {
+                const result = await criarAS(dadosParaSalvar);
+
+                if (result.pending) {
+                    setModalMessage(
+                        'AS salva no dispositivo. Ela será enviada automaticamente quando a conexão voltar.'
+                    );
+                } else {
+                    setModalMessage('AS criada com sucesso!');
+                }
+            }
+
+            setNavigateOnClose(true);
             setModalVisible(true);
+
         } catch (error) {
-            console.error('Erro ao salvar AS:', error);
-            setModalMessage('Erro ao salvar AS. Verifique os dados e tente novamente.');
+            const errorData = error.response?.data || error.message || error;
+
+            console.error('Erro ao salvar AS:', errorData);
+
+            if (error.response?.data) {
+                setModalMessage(
+                    typeof error.response.data === 'string'
+                        ? error.response.data
+                        : JSON.stringify(error.response.data, null, 2)
+                );
+            } else {
+                setModalMessage(
+                    error.message || 'Erro ao salvar AS. Verifique os dados e tente novamente.'
+                );
+            }
+
             setModalVisible(true);
         } finally {
             setLoading(false);

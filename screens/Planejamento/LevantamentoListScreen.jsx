@@ -1,50 +1,57 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { listarLevantamentos, buscarLevantamentosNaAPI } from '../../services/levantamentoService'; 
+import { listarLevantamentos } from '../../services/levantamentoService';
 import { MaterialIcons } from '@expo/vector-icons';
-import { format, parseISO } from 'date-fns'; 
+import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 export default function LevantamentoListScreen() {
     const navigation = useNavigation();
+
     const [levantamentos, setLevantamentos] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
-    
-    // --- ESTADOS PARA BUSCA E PAGINAÇÃO ---
-    const [searchText, setSearchText] = useState("");
+
+    const [searchText, setSearchText] = useState('');
     const [page, setPage] = useState(1);
     const [loadingMore, setLoadingMore] = useState(false);
-    const [hasMore, setHasMore] = useState(true);
-    const PAGE_SIZE = 15;
+    const [hasMore, setHasMore] = useState(false);
 
     const fetchLevantamentos = async (pageNum = 1, shouldRefresh = false) => {
-        if (pageNum > 1) setLoadingMore(true);
-        
-        try {
-            // 1. Se tem texto de busca e é a primeira página, tenta buscar na API primeiro
-            if (searchText.length > 0 && pageNum === 1) {
-                console.log("🔍 Buscando LVT na API por:", searchText);
-                await buscarLevantamentosNaAPI(searchText); 
-            }
+        if (pageNum > 1) {
+            setLoadingMore(true);
+        } else {
+            setHasMore(false);
+        }
 
-            // 2. Busca no SQLite (que contém o que veio da API + offline local)
-            const data = await listarLevantamentos(pageNum, PAGE_SIZE, searchText);
-            
-            if (data.length < PAGE_SIZE) {
-                setHasMore(false);
-            } else {
-                setHasMore(true);
-            }
+        try {
+            console.log(`🌐 Buscando Levantamentos - página ${pageNum} - busca "${searchText}"`);
+
+            const response = await listarLevantamentos({
+                page: pageNum,
+                search: searchText,
+            });
+
+            const data = response.results || [];
+
+            console.log(
+                `📡 API retornou ${data.length} Levantamento(s). Total: ${response.count ?? 'N/A'}`
+            );
+
+            setHasMore(Boolean(response.next));
 
             if (shouldRefresh || pageNum === 1) {
                 setLevantamentos(data);
             } else {
                 setLevantamentos(prev => [...prev, ...data]);
             }
+
         } catch (error) {
-            console.error('Erro ao buscar lista de Levantamentos:', error);
+            console.error(
+                '❌ Erro ao buscar lista de Levantamentos:',
+                error.response?.data || error.message
+            );
         } finally {
             setLoading(false);
             setLoadingMore(false);
@@ -52,22 +59,22 @@ export default function LevantamentoListScreen() {
         }
     };
 
-    // Efeito para quando a tela ganha foco (sem busca ativa)
     useFocusEffect(
         useCallback(() => {
-            if (searchText === "") {
+            if (searchText === '') {
                 setPage(1);
+                setHasMore(false);
                 fetchLevantamentos(1, true);
             }
         }, [])
     );
 
-    // Efeito Debounce para busca por texto
     useEffect(() => {
-        if (searchText === "") return;
+        if (searchText === '') return;
 
         const delayDebounce = setTimeout(() => {
             setPage(1);
+            setHasMore(false);
             fetchLevantamentos(1, true);
         }, 800);
 
@@ -77,20 +84,21 @@ export default function LevantamentoListScreen() {
     const handleRefresh = () => {
         setIsRefreshing(true);
         setPage(1);
+        setHasMore(false);
         fetchLevantamentos(1, true);
     };
 
     const handleLoadMore = () => {
-        if (!loadingMore && hasMore) {
-            const nextPage = page + 1;
-            setPage(nextPage);
-            fetchLevantamentos(nextPage);
-        }
+        if (loadingMore || loading || !hasMore) return;
+
+        const nextPage = page + 1;
+        setPage(nextPage);
+        fetchLevantamentos(nextPage);
     };
 
-    // --- RENDERIZAÇÃO ---
     const renderFooter = () => {
         if (!loadingMore) return null;
+
         return (
             <View style={styles.loadingMore}>
                 <ActivityIndicator size="small" color="#00315c" />
@@ -99,25 +107,47 @@ export default function LevantamentoListScreen() {
     };
 
     const renderItem = ({ item }) => {
-        const syncColor = item.sync_status === 'pending' ? '#ffc107' : '#28a745';
-        let lvtData = item.data ? format(parseISO(item.data), 'dd/MM/yyyy', { locale: ptBR }) : 'S/ Data';
-        const displayId = item.server_id || item.id;
+        let lvtData = 'S/ Data';
+
+        try {
+            if (item.data) {
+                lvtData = format(
+                    parseISO(item.data),
+                    'dd/MM/yyyy',
+                    { locale: ptBR }
+                );
+            }
+        } catch (error) {
+            console.warn('Erro ao formatar data do Levantamento:', error);
+        }
 
         return (
-            <TouchableOpacity 
-                style={[styles.itemContainer, { borderLeftColor: syncColor }]} 
-                onPress={() => navigation.navigate('LevantamentoForm', { id: item.id })}
+            <TouchableOpacity
+                style={styles.itemContainer}
+                onPress={() =>
+                    navigation.navigate('LevantamentoForm', { id: item.id })
+                }
                 activeOpacity={0.8}
             >
                 <View style={styles.textContainer}>
-                    <Text style={styles.lvtTitle}>LVT N° {String(displayId).padStart(5, '0')}</Text> 
-                    <Text style={styles.detailText}>Data: {lvtData} | Local: {item.local || 'N/I'}</Text>
-                    <Text style={styles.detailText} numberOfLines={1}>Escopo: {item.escopo || 'N/E'}</Text>
-                    <Text style={[styles.syncStatusText, { color: syncColor }]}>
-                        {item.sync_status === 'pending' ? '🟡 Pendente' : '🟢 Sincronizado'}
+                    <Text style={styles.lvtTitle}>
+                        LVT N° {String(item.id).padStart(5, '0')}
+                    </Text>
+
+                    <Text style={styles.detailText}>
+                        Data: {lvtData} | Local: {item.local || 'N/I'}
+                    </Text>
+
+                    <Text style={styles.detailText} numberOfLines={1}>
+                        Escopo: {item.escopo || 'N/E'}
                     </Text>
                 </View>
-                <MaterialIcons name="chevron-right" size={30} color="#00315c" />
+
+                <MaterialIcons
+                    name="chevron-right"
+                    size={30}
+                    color="#00315c"
+                />
             </TouchableOpacity>
         );
     };

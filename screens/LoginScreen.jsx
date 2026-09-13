@@ -99,15 +99,16 @@ export default function LoginScreen() {
           <View style={styles.input}>
             <Text style={styles.inputLabel}>Senha</Text>
             <TextInput
-              autoCorrect={false}
-              clearButtonMode="while-editing"
-              onChangeText={(password) => setForm({ ...form, password })}
-              placeholder="********"
-              placeholderTextColor="#6b7280"
-              style={styles.inputControl}
-              secureTextEntry={true}
-              value={form.password}
-            />
+                autoCapitalize="none"
+                autoCorrect={false}
+                clearButtonMode="while-editing"
+                onChangeText={(password) => setForm({ ...form, password })}
+                placeholder="********"
+                placeholderTextColor="#6b7280"
+                style={styles.inputControl}
+                secureTextEntry={true}
+                value={form.password}
+              />
           </View>
 
           <View style={styles.formAction}>
