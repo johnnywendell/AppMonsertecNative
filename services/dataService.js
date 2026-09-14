@@ -1,51 +1,488 @@
+import NetInfo from '@react-native-community/netinfo';
+
 import { api } from './api';// Importe sua instância configurada do Axios
+
+import {
+    listarProjetoCodigosCache,
+    atualizarProjetoCodigosCache
+} from './projetoCodigoService';
+
+import {
+    listarAprovadoresCache,
+    atualizarAprovadoresCache
+} from './aprovadorService';
+
+import {
+    listarSolicitantesCache,
+    atualizarSolicitantesCache
+} from './solicitanteService';
+
+import {
+    listarAreasCache,
+    atualizarAreasCache
+} from './areaService';
+
+import {
+    listarItensBmCache,
+    atualizarItensBmCache
+} from './itembmService';
+
+import {
+    listarColaboradoresCache,
+    atualizarColaboradoresCache
+} from './colaboradorService';
 
 // --- Funções de Fetch para o RDC Principal ---
 
 // --- SOLICITANTES ---
-export const fetchSolicitantes = async () => {
-    try {
-        const { data } = await api.get('api/v1/geral/solicitantes/');
-        // O campo que você quer mostrar é 'solicitante'
-        return data.map(item => ({ 
-            label: item.solicitante, // <-- CORRIGIDO: Usa item.solicitante
-            value: item.id 
-        }));
-    } catch (error) {
-        console.error('Erro ao buscar Solicitantes:', error);
-        return [];
-    }
-};
+export const fetchSolicitantes =
+    async () => {
+
+        // -------------------------------------------------
+        // VERIFICA CONECTIVIDADE
+        // -------------------------------------------------
+
+        const netInfo =
+            await NetInfo.fetch();
+
+
+        const offline =
+            !netInfo.isConnected ||
+            netInfo.isInternetReachable === false;
+
+
+        // =================================================
+        // OFFLINE
+        // =================================================
+
+        if (offline) {
+
+            console.log(
+                'Sem internet - carregando Solicitantes do SQLite'
+            );
+
+
+            const locais =
+                await listarSolicitantesCache();
+
+
+            return locais.map(
+                item => ({
+
+                    label:
+                        item.solicitante,
+
+                    value:
+                        item.server_id
+                })
+            );
+        }
+
+
+        // =================================================
+        // ONLINE
+        // =================================================
+
+        try {
+
+            const {
+                data
+            } = await api.get(
+                'api/v1/geral/solicitantes/'
+            );
+
+
+            // ---------------------------------------------
+            // LISTA DIRETA OU PAGINADA
+            // ---------------------------------------------
+
+            const solicitantes =
+                data?.results ||
+                data ||
+                [];
+
+
+            // ---------------------------------------------
+            // ATUALIZA CACHE
+            // ---------------------------------------------
+
+            try {
+
+                await atualizarSolicitantesCache(
+                    solicitantes
+                );
+
+            } catch (cacheError) {
+
+                console.warn(
+                    'API de Solicitantes carregou, mas o cache não pôde ser atualizado:',
+                    cacheError.message
+                );
+            }
+
+
+            // ---------------------------------------------
+            // RETORNO PARA PICKERS
+            // ---------------------------------------------
+
+            return solicitantes.map(
+                item => ({
+
+                    label:
+                        item.solicitante,
+
+                    value:
+                        item.id
+                })
+            );
+
+
+        } catch (error) {
+
+            // =================================================
+            // INTERNET CAIU DURANTE A REQUISIÇÃO
+            // =================================================
+
+            if (
+                !error.response
+            ) {
+
+                console.warn(
+                    'API de Solicitantes indisponível - usando SQLite'
+                );
+
+
+                const locais =
+                    await listarSolicitantesCache();
+
+
+                return locais.map(
+                    item => ({
+
+                        label:
+                            item.solicitante,
+
+                        value:
+                            item.server_id
+                    })
+                );
+            }
+
+
+            // =================================================
+            // ERRO REAL DA API
+            // =================================================
+
+            console.error(
+                'Erro da API ao buscar Solicitantes:',
+                error.response?.data ||
+                error.message
+            );
+
+
+            return [];
+        }
+    };
 
 // --- APROVADORES ---
-export const fetchAprovadores = async () => {
-    try {
-        const { data } = await api.get('api/v1/geral/aprovadores/');
-        // O campo que você quer mostrar é 'aprovador'
-        return data.map(item => ({ 
-            label: item.aprovador, // <-- CORRIGIDO: Usa item.aprovador
-            value: item.id 
-        }));
-    } catch (error) {
-        console.error('Erro ao buscar Aprovadores:', error);
-        return [];
-    }
-};
+export const fetchAprovadores =
+    async () => {
+
+        // -------------------------------------------------
+        // VERIFICA CONECTIVIDADE
+        // -------------------------------------------------
+
+        const netInfo =
+            await NetInfo.fetch();
+
+
+        const offline =
+            !netInfo.isConnected ||
+            netInfo.isInternetReachable === false;
+
+
+        // =================================================
+        // OFFLINE
+        // =================================================
+
+        if (offline) {
+
+            console.log(
+                'Sem internet - carregando Aprovadores do SQLite'
+            );
+
+
+            const locais =
+                await listarAprovadoresCache();
+
+
+            return locais.map(
+                item => ({
+
+                    label:
+                        item.aprovador,
+
+                    value:
+                        item.server_id
+                })
+            );
+        }
+
+
+        // =================================================
+        // ONLINE
+        // =================================================
+
+        try {
+
+            const {
+                data
+            } = await api.get(
+                'api/v1/geral/aprovadores/'
+            );
+
+
+            // ---------------------------------------------
+            // ACEITA LISTA DIRETA OU PAGINADA
+            // ---------------------------------------------
+
+            const aprovadores =
+                data?.results ||
+                data ||
+                [];
+
+
+            // ---------------------------------------------
+            // ATUALIZA CACHE
+            // ---------------------------------------------
+
+            try {
+
+                await atualizarAprovadoresCache(
+                    aprovadores
+                );
+
+            } catch (cacheError) {
+
+                console.warn(
+                    'API de Aprovadores carregou, mas o cache não pôde ser atualizado:',
+                    cacheError.message
+                );
+            }
+
+
+            // ---------------------------------------------
+            // RETORNO PARA PICKERS
+            // ---------------------------------------------
+
+            return aprovadores.map(
+                item => ({
+
+                    label:
+                        item.aprovador,
+
+                    value:
+                        item.id
+                })
+            );
+
+
+        } catch (error) {
+
+            // =================================================
+            // INTERNET CAIU DEPOIS DO NETINFO
+            // =================================================
+
+            if (
+                !error.response
+            ) {
+
+                console.warn(
+                    'API de Aprovadores indisponível - usando SQLite'
+                );
+
+
+                const locais =
+                    await listarAprovadoresCache();
+
+
+                return locais.map(
+                    item => ({
+
+                        label:
+                            item.aprovador,
+
+                        value:
+                            item.server_id
+                    })
+                );
+            }
+
+
+            // =================================================
+            // ERRO REAL DA API
+            // =================================================
+
+            console.error(
+                'Erro da API ao buscar Aprovadores:',
+                error.response?.data ||
+                error.message
+            );
+
+
+            return [];
+        }
+    };
 
 // --- UNIDADES (ÁREA) ---
-export const fetchUnidades = async () => {
-    try {
-        const { data } = await api.get('api/v1/geral/areas/');
-        // O campo que você quer mostrar é 'area'
-        return data.map(item => ({ 
-            label: item.area, // <-- CORRIGIDO: Usa item.area
-            value: item.id 
-        }));
-    } catch (error) {
-        console.error('Erro ao buscar Unidades:', error);
-        return [];
-    }
-};
+export const fetchUnidades =
+    async () => {
+
+        // -------------------------------------------------
+        // VERIFICA CONECTIVIDADE
+        // -------------------------------------------------
+
+        const netInfo =
+            await NetInfo.fetch();
+
+
+        const offline =
+            !netInfo.isConnected ||
+            netInfo.isInternetReachable === false;
+
+
+        // =================================================
+        // OFFLINE
+        // =================================================
+
+        if (offline) {
+
+            console.log(
+                'Sem internet - carregando Áreas do SQLite'
+            );
+
+
+            const locais =
+                await listarAreasCache();
+
+
+            return locais.map(
+                item => ({
+
+                    label:
+                        item.area,
+
+                    value:
+                        item.server_id
+                })
+            );
+        }
+
+
+        // =================================================
+        // ONLINE
+        // =================================================
+
+        try {
+
+            const {
+                data
+            } = await api.get(
+                'api/v1/geral/areas/'
+            );
+
+
+            // ---------------------------------------------
+            // LISTA DIRETA OU PAGINADA
+            // ---------------------------------------------
+
+            const areas =
+                data?.results ||
+                data ||
+                [];
+
+
+            // ---------------------------------------------
+            // ATUALIZA CACHE
+            // ---------------------------------------------
+
+            try {
+
+                await atualizarAreasCache(
+                    areas
+                );
+
+            } catch (cacheError) {
+
+                console.warn(
+                    'API de Áreas carregou, mas o cache não pôde ser atualizado:',
+                    cacheError.message
+                );
+            }
+
+
+            // ---------------------------------------------
+            // RETORNO PARA PICKERS
+            // ---------------------------------------------
+
+            return areas.map(
+                item => ({
+
+                    label:
+                        item.area,
+
+                    value:
+                        item.id
+                })
+            );
+
+
+        } catch (error) {
+
+            // =================================================
+            // INTERNET CAIU DURANTE A REQUISIÇÃO
+            // =================================================
+
+            if (
+                !error.response
+            ) {
+
+                console.warn(
+                    'API de Áreas indisponível - usando SQLite'
+                );
+
+
+                const locais =
+                    await listarAreasCache();
+
+
+                return locais.map(
+                    item => ({
+
+                        label:
+                            item.area,
+
+                        value:
+                            item.server_id
+                    })
+                );
+            }
+
+
+            // =================================================
+            // ERRO REAL DA API
+            // =================================================
+
+            console.error(
+                'Erro da API ao buscar Áreas:',
+                error.response?.data ||
+                error.message
+            );
+
+
+            return [];
+        }
+    };
 
 export const fetchASOptions = async () => {
     try {
@@ -69,24 +506,331 @@ export const fetchASOptions = async () => {
     }
 };
 
-export const fetchProjetoCodigos = async () => {
-    try {
-        const { data } = await api.get('api/v1/planejamento/projetocodigo/');
-        // Exemplo: Se o campo do Código de Projeto for 'codigo'
-        return data.map(item => ({ 
-            label: item.projeto_nome, // Ajuste para o nome real do campo
-            value: item.id 
-        }));
-    } catch (error) {
-        console.error('Erro ao buscar Códigos de Projeto:', error);
-        return [];
-    }
-};
+export const fetchProjetoCodigos =
+    async () => {
+
+        // -------------------------------------------------
+        // VERIFICA CONECTIVIDADE
+        // -------------------------------------------------
+
+        const netInfo =
+            await NetInfo.fetch();
+
+
+        const offline =
+            !netInfo.isConnected ||
+            netInfo.isInternetReachable === false;
+
+
+        // =================================================
+        // OFFLINE
+        // =================================================
+
+        if (offline) {
+
+            console.log(
+                'Sem internet - carregando Projetos do SQLite'
+            );
+
+
+            const locais =
+                await listarProjetoCodigosCache();
+
+
+            return locais.map(
+                item => ({
+
+                    label:
+                        item.projeto_nome,
+
+                    // IMPORTANTE:
+                    // sempre usamos o ID do Django.
+                    value:
+                        item.server_id
+                })
+            );
+        }
+
+
+        // =================================================
+        // ONLINE
+        // =================================================
+
+        try {
+
+            const {
+                data
+            } = await api.get(
+                'api/v1/planejamento/projetocodigo/'
+            );
+
+
+            // ---------------------------------------------
+            // Aceita API paginada ou lista simples
+            // ---------------------------------------------
+
+            const projetos =
+                data?.results ||
+                data ||
+                [];
+
+
+            // ---------------------------------------------
+            // ATUALIZA CACHE LOCAL
+            // ---------------------------------------------
+
+            try {
+
+                await atualizarProjetoCodigosCache(
+                    projetos
+                );
+
+            } catch (cacheError) {
+
+                // Problema no SQLite não deve impedir
+                // o uso dos dados que chegaram da API.
+
+                console.warn(
+                    'API de Projetos carregou, mas o cache não pôde ser atualizado:',
+                    cacheError.message
+                );
+            }
+
+
+            // ---------------------------------------------
+            // RETORNO PADRÃO DOS PICKERS
+            // ---------------------------------------------
+
+            return projetos.map(
+                item => ({
+
+                    label:
+                        item.projeto_nome,
+
+                    value:
+                        item.id
+                })
+            );
+
+
+        } catch (error) {
+
+            // =================================================
+            // INTERNET CAIU DEPOIS DO NETINFO
+            // =================================================
+
+            if (
+                !error.response
+            ) {
+
+                console.warn(
+                    'API de Projetos indisponível - usando SQLite'
+                );
+
+
+                const locais =
+                    await listarProjetoCodigosCache();
+
+
+                return locais.map(
+                    item => ({
+
+                        label:
+                            item.projeto_nome,
+
+                        value:
+                            item.server_id
+                    })
+                );
+            }
+
+
+            // =================================================
+            // ERRO REAL DA API
+            // =================================================
+
+            console.error(
+                'Erro da API ao buscar Códigos de Projeto:',
+                error.response?.data ||
+                error.message
+            );
+
+
+            return [];
+        }
+    };
 
 // --- Funções de Fetch para Itens Filhos ---
 
 // Colaborador (para ItemMedicaohh)
-export const fetchColaboradores = async () => {
+export const fetchColaboradores =
+    async () => {
+
+        const netInfo =
+            await NetInfo.fetch();
+
+
+        const offline =
+            !netInfo.isConnected ||
+            netInfo.isInternetReachable === false;
+
+
+        // =================================================
+        // OFFLINE
+        // =================================================
+
+        if (offline) {
+
+            console.log(
+                'Sem internet - carregando Colaboradores do SQLite'
+            );
+
+
+            const locais =
+                await listarColaboradoresCache();
+
+
+            return locais.map(
+                item => ({
+
+                    label:
+                        `${item.matricula || ''} - ${item.nome}`,
+
+                    value:
+                        item.server_id
+                })
+            );
+        }
+
+
+        // =================================================
+        // ONLINE
+        // =================================================
+
+        try {
+
+            const {
+                data
+            } = await api.get(
+                'api/v1/efetivo/colaboradores/'
+            );
+
+
+            const colaboradores =
+                data?.results ||
+                data ||
+                [];
+
+
+            // -------------------------------------------------
+            // ATUALIZA CACHE GERAL
+            // -------------------------------------------------
+
+            try {
+
+                await atualizarColaboradoresCache(
+                    colaboradores
+                );
+
+            } catch (cacheError) {
+
+                console.warn(
+                    'API de Colaboradores carregou, mas o cache não pôde ser atualizado:',
+                    cacheError.message
+                );
+            }
+
+
+            return colaboradores.map(
+                item => ({
+
+                    label:
+                        `${item.matricula || ''} - ${item.nome}`,
+
+                    value:
+                        item.id
+                })
+            );
+
+
+        } catch (error) {
+
+            // =================================================
+            // FALHA DE REDE
+            // =================================================
+
+            if (
+                !error.response
+            ) {
+
+                console.warn(
+                    'API de Colaboradores indisponível - usando SQLite'
+                );
+
+
+                const locais =
+                    await listarColaboradoresCache();
+
+
+                return locais.map(
+                    item => ({
+
+                        label:
+                            `${item.matricula || ''} - ${item.nome}`,
+
+                        value:
+                            item.server_id
+                    })
+                );
+            }
+
+
+            // =================================================
+            // ERRO REAL DA API
+            // =================================================
+
+            console.error(
+                'Erro da API ao buscar Colaboradores:',
+                error.response?.data ||
+                error.message
+            );
+
+
+            return [];
+        }
+    };
+
+export const fetchColaboradoresDisponiveisHoje = async () => {
+
+    try {
+
+        const { data } =
+            await api.get(
+                'api/v1/efetivo/colaboradores-hoje/'
+            );
+
+
+        return data.map(item => ({
+
+            label:
+                `${item.matricula || ''} - ${item.nome}`,
+
+            value:
+                item.id
+        }));
+
+    } catch (error) {
+
+        console.error(
+            'Erro ao buscar Colaboradores:',
+            error
+        );
+
+        return [];
+    }
+};
+
+export const fetchColaboradoresList = async () => {
 
     try {
 
@@ -116,13 +860,14 @@ export const fetchColaboradores = async () => {
     }
 };
 
+
 // Item Contrato (ItemBm - para HH e PIN)
 export const fetchItemContratoOptions = async () => {
     try {
         // Você pode precisar de lógica de filtragem aqui (como o ItemBm.objects.filter no Django)
         const { data } = await api.get('api/v1/geral/itens-bm/');
         // Assumindo que o ItemBm tem 'descricao' e 'id'
-        return data.map(item => ({ label: item.descricao, value: item.id }));
+        return data.map(item => ({ label: item.item_ref + item.descricao, value: item.id }));
     } catch (error) {
         console.error('Erro ao buscar Itens Contrato:', error);
         throw error;

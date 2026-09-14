@@ -1,120 +1,658 @@
-import React, { useState, useCallback } from 'react';
-import { View, TouchableOpacity, StyleSheet, Text, FlatList, ActivityIndicator } from 'react-native';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { listarColaboradores } from '../../services/colaboradorService'; // Importa o serviço
-import { FontAwesome } from '@expo/vector-icons'; 
+import React, {
+    useCallback,
+    useMemo,
+    useState
+} from 'react';
+
+import {
+    View,
+    Text,
+    TextInput,
+    StyleSheet,
+    FlatList,
+    ActivityIndicator
+} from 'react-native';
+
+import {
+    useFocusEffect
+} from '@react-navigation/native';
+
+import {
+    MaterialIcons
+} from '@expo/vector-icons';
+
+import {
+    listarColaboradoresCache
+} from '../../services/colaboradorService';
+
+import {
+    fetchColaboradores
+} from '../../services/dataService';
+
+
+const PRIMARY =
+    '#00315c';
+
 
 export default function ColaboradorListScreen() {
-    // ...
-    const navigation = useNavigation();
-    
-    // 2. CORREÇÃO: Inicializar o estado dos colaboradores (faltava no seu código)
-    const [colaboradores, setColaboradores] = useState([]);
-    const [loading, setLoading] = useState(true);
 
-    const carregarColaboradores = useCallback(async () => {
-        setLoading(true);
-        try {
-            const data = await listarColaboradores();
-            setColaboradores(data);
-        } catch (error) {
-            console.error('Falha ao carregar colaboradores:', error);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-    
-    // CORREÇÃO: useFocusEffect agora usa o React.useCallback e chama a função assíncrona
+    const [
+        colaboradores,
+        setColaboradores
+    ] = useState([]);
+
+
+    const [
+        search,
+        setSearch
+    ] = useState('');
+
+
+    const [
+        loading,
+        setLoading
+    ] = useState(true);
+
+
+    const [
+        isRefreshing,
+        setIsRefreshing
+    ] = useState(false);
+
+
+    // =====================================================
+    // CARREGAR CACHE
+    // =====================================================
+
+    const carregarColaboradores =
+        useCallback(async () => {
+
+            try {
+
+                const data =
+                    await listarColaboradoresCache();
+
+
+                setColaboradores(
+                    data || []
+                );
+
+
+            } catch (error) {
+
+                console.error(
+                    'Erro ao carregar cache de Colaboradores:',
+                    error
+                );
+
+
+            } finally {
+
+                setLoading(false);
+
+                setIsRefreshing(false);
+            }
+
+        }, []);
+
+
+    // =====================================================
+    // AO ENTRAR NA TELA
+    // =====================================================
+
     useFocusEffect(
-        React.useCallback(() => {
+
+        useCallback(() => {
+
+            setLoading(true);
+
             carregarColaboradores();
-            
-            // Opcional: Adicionar clean-up, se necessário, mas para fetch, geralmente não é preciso.
-            // return () => { /* Cleanup function */ };
-        }, [carregarColaboradores]) // Dependência é o carregarColaboradores (embora useCallback já garanta estabilidade)
+
+        }, [
+            carregarColaboradores
+        ])
     );
 
-    const renderItem = ({ item }) => (
-        <TouchableOpacity 
-            style={styles.item}
-            // Navega para o formulário, passando o ID para edição
-            onPress={() => navigation.navigate('ColaboradorForm', { id: item.id })}
-            activeOpacity={0.8}
+
+    // =====================================================
+    // ATUALIZAR CACHE
+    // =====================================================
+
+    const handleRefresh =
+        async () => {
+
+            setIsRefreshing(true);
+
+            try {
+
+                // Busca API e atualiza SQLite
+                await fetchColaboradores();
+
+
+                // Relê cache atualizado
+                const data =
+                    await listarColaboradoresCache();
+
+
+                setColaboradores(
+                    data || []
+                );
+
+
+            } catch (error) {
+
+                console.error(
+                    'Erro ao atualizar cache de Colaboradores:',
+                    error
+                );
+
+
+            } finally {
+
+                setIsRefreshing(false);
+            }
+        };
+
+
+    // =====================================================
+    // PESQUISA
+    // =====================================================
+
+    const colaboradoresFiltrados =
+        useMemo(() => {
+
+            const termo =
+                search
+                    .trim()
+                    .toLowerCase();
+
+
+            if (!termo) {
+
+                return colaboradores;
+            }
+
+
+            return colaboradores.filter(
+                item => {
+
+                    const nome =
+                        String(
+                            item.nome || ''
+                        ).toLowerCase();
+
+
+                    const matricula =
+                        String(
+                            item.matricula || ''
+                        ).toLowerCase();
+
+
+                    const funcao =
+                        String(
+                            item.funcao || ''
+                        ).toLowerCase();
+
+
+                    const disciplina =
+                        String(
+                            item.disciplina || ''
+                        ).toLowerCase();
+
+
+                    return (
+                        nome.includes(termo) ||
+                        matricula.includes(termo) ||
+                        funcao.includes(termo) ||
+                        disciplina.includes(termo)
+                    );
+                }
+            );
+
+        }, [
+            colaboradores,
+            search
+        ]);
+
+
+    // =====================================================
+    // ITEM
+    // =====================================================
+
+    const renderItem = ({
+        item
+    }) => (
+
+        <View
+            style={
+                styles.itemContainer
+            }
         >
-            <View style={styles.itemContent}>
-                <Text style={styles.nome}>{item.nome}</Text>
-                <Text style={styles.detalhe}>
-                    {item.matricula} | {item.disciplina} | {item.funcao}
-                </Text>
+
+            <View
+                style={
+                    styles.iconContainer
+                }
+            >
+
+                <MaterialIcons
+                    name="person"
+                    size={23}
+                    color={PRIMARY}
+                />
+
             </View>
-            <View style={styles.statusContainer}>
-                <Text style={[styles.status, { color: item.sync_status === 'pending' ? '#ff9800' : '#4caf50' }]}>
-                    {item.sync_status === 'pending' ? 'Pend. Sync' : 'OK'}
+
+
+            <View
+                style={
+                    styles.textContainer
+                }
+            >
+
+                <Text
+                    style={
+                        styles.nome
+                    }
+                >
+                    {item.nome || '-'}
                 </Text>
-                <FontAwesome name="chevron-right" size={14} color="#ccc" style={{ marginLeft: 8 }} />
+
+
+                <Text
+                    style={
+                        styles.matricula
+                    }
+                >
+                    Matrícula: {item.matricula || '-'}
+                </Text>
+
+
+                <View
+                    style={
+                        styles.detailsRow
+                    }
+                >
+
+                    <Text
+                        style={
+                            styles.detail
+                        }
+                    >
+                        {item.funcao || '-'}
+                    </Text>
+
+
+                    <Text
+                        style={
+                            styles.separator
+                        }
+                    >
+                        •
+                    </Text>
+
+
+                    <Text
+                        style={
+                            styles.detail
+                        }
+                    >
+                        {item.disciplina || '-'}
+                    </Text>
+
+                </View>
+
+
+                <Text
+                    style={
+                        styles.itemId
+                    }
+                >
+                    ID: {item.server_id}
+                </Text>
+
             </View>
-        </TouchableOpacity>
+
+        </View>
     );
 
-    if (loading) {
-        return <ActivityIndicator size="large" color="#00315c" style={styles.loading} />;
+
+    // =====================================================
+    // LOADING
+    // =====================================================
+
+    if (
+        loading &&
+        colaboradores.length === 0
+    ) {
+
+        return (
+
+            <View
+                style={
+                    styles.loadingContainer
+                }
+            >
+
+                <ActivityIndicator
+                    size="large"
+                    color={PRIMARY}
+                />
+
+
+                <Text
+                    style={
+                        styles.loadingText
+                    }
+                >
+                    Carregando colaboradores...
+                </Text>
+
+            </View>
+        );
     }
 
+
     return (
-        <View style={styles.container}>
+
+        <View
+            style={
+                styles.container
+            }
+        >
+
             <FlatList
-                data={colaboradores}
-                keyExtractor={item => item.id.toString()}
-                renderItem={renderItem}
-                ListEmptyComponent={<Text style={styles.emptyText}>Nenhum colaborador cadastrado.</Text>}
+
+                data={
+                    colaboradoresFiltrados
+                }
+
+                renderItem={
+                    renderItem
+                }
+
+                keyExtractor={
+                    item =>
+                        String(
+                            item.server_id
+                        )
+                }
+
+                refreshing={
+                    isRefreshing
+                }
+
+                onRefresh={
+                    handleRefresh
+                }
+
+                contentContainerStyle={[
+                    styles.listContent,
+
+                    colaboradoresFiltrados.length === 0 &&
+                    styles.emptyList
+                ]}
+
+                ListHeaderComponent={
+
+                    <View>
+
+                        <View
+                            style={
+                                styles.header
+                            }
+                        >
+
+                            <Text
+                                style={
+                                    styles.headerTitle
+                                }
+                            >
+                                Colaboradores
+                            </Text>
+
+
+                            <Text
+                                style={
+                                    styles.headerSubtitle
+                                }
+                            >
+                                {colaboradores.length}
+                                {' '}
+                                {
+                                    colaboradores.length === 1
+                                        ? 'colaborador disponível'
+                                        : 'colaboradores disponíveis'
+                                }
+                                {' • '}
+                                puxe para atualizar
+                            </Text>
+
+                        </View>
+
+
+                        <View
+                            style={
+                                styles.searchContainer
+                            }
+                        >
+
+                            <MaterialIcons
+                                name="search"
+                                size={21}
+                                color="#777"
+                            />
+
+
+                            <TextInput
+                                style={
+                                    styles.searchInput
+                                }
+
+                                value={
+                                    search
+                                }
+
+                                onChangeText={
+                                    setSearch
+                                }
+
+                                placeholder="Nome, matrícula, função ou disciplina..."
+
+                                placeholderTextColor="#999"
+
+                                autoCorrect={
+                                    false
+                                }
+                            />
+
+                        </View>
+
+                    </View>
+                }
+
+                ListEmptyComponent={
+
+                    !loading
+                        ? (
+
+                            <View
+                                style={
+                                    styles.emptyContainer
+                                }
+                            >
+
+                                <MaterialIcons
+                                    name={
+                                        search
+                                            ? 'search-off'
+                                            : 'people'
+                                    }
+                                    size={48}
+                                    color="#bbb"
+                                />
+
+
+                                <Text
+                                    style={
+                                        styles.emptyTitle
+                                    }
+                                >
+                                    {
+                                        search
+                                            ? 'Nenhum colaborador encontrado'
+                                            : 'Nenhum colaborador disponível'
+                                    }
+                                </Text>
+
+                            </View>
+                        )
+                        : null
+                }
+
             />
 
-            <TouchableOpacity
-                style={styles.fab}
-                // Navega para o formulário, sem ID para criação
-                onPress={() => navigation.navigate('ColaboradorForm', { id: null })}
-                activeOpacity={0.7}
-            >
-                <Text style={styles.fabIcon}>＋</Text>
-            </TouchableOpacity>
         </View>
     );
 }
 
-const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f0f0f0' },
-    loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    item: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: '#fff',
-        padding: 15,
-        borderBottomWidth: 1,
-        borderBottomColor: '#eee',
-    },
-    itemContent: { flex: 1, paddingRight: 10 },
-    nome: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-    detalhe: { fontSize: 13, color: '#666', marginTop: 2 },
-    statusContainer: { flexDirection: 'row', alignItems: 'center' },
-    status: { fontSize: 12, fontWeight: 'bold' },
-    emptyText: { textAlign: 'center', marginTop: 50, fontSize: 16, color: '#999' },
-    // FAB styles from your example
-    fab: {
-        position: 'absolute',
-        right: 20,
-        bottom: 30,
-        backgroundColor: '#00315c',
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        alignItems: 'center',
-        justifyContent: 'center',
-        elevation: 5,
-    },
-    fabIcon: {
-        color: 'white',
-        fontSize: 30,
-        lineHeight: 30,
-    },
-});
+
+// =========================================================
+// STYLES
+// =========================================================
+
+const styles =
+    StyleSheet.create({
+
+        container: {
+            flex: 1,
+            backgroundColor: '#f5f5f5',
+        },
+
+        listContent: {
+            padding: 16,
+            paddingBottom: 30,
+        },
+
+        emptyList: {
+            flexGrow: 1,
+        },
+
+        header: {
+            marginBottom: 12,
+        },
+
+        headerTitle: {
+            fontSize: 18,
+            fontWeight: '700',
+            color: PRIMARY,
+        },
+
+        headerSubtitle: {
+            marginTop: 3,
+            fontSize: 12,
+            color: '#777',
+        },
+
+        searchContainer: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: '#fff',
+            borderRadius: 9,
+            paddingHorizontal: 12,
+            marginBottom: 14,
+            elevation: 1,
+        },
+
+        searchInput: {
+            flex: 1,
+            height: 46,
+            marginLeft: 8,
+            fontSize: 14,
+            color: '#333',
+        },
+
+        itemContainer: {
+            flexDirection: 'row',
+            backgroundColor: '#fff',
+            borderRadius: 10,
+            padding: 14,
+            marginBottom: 9,
+            elevation: 1,
+        },
+
+        iconContainer: {
+            width: 42,
+            height: 42,
+            borderRadius: 21,
+            backgroundColor: '#eef4f8',
+            justifyContent: 'center',
+            alignItems: 'center',
+            marginRight: 12,
+        },
+
+        textContainer: {
+            flex: 1,
+        },
+
+        nome: {
+            fontSize: 15,
+            fontWeight: '700',
+            color: '#333',
+        },
+
+        matricula: {
+            marginTop: 3,
+            fontSize: 12,
+            color: PRIMARY,
+            fontWeight: '600',
+        },
+
+        detailsRow: {
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            marginTop: 4,
+        },
+
+        detail: {
+            fontSize: 12,
+            color: '#666',
+        },
+
+        separator: {
+            marginHorizontal: 6,
+            color: '#aaa',
+        },
+
+        itemId: {
+            marginTop: 6,
+            fontSize: 10,
+            color: '#aaa',
+        },
+
+        loadingContainer: {
+            flex: 1,
+            justifyContent: 'center',
+            alignItems: 'center',
+        },
+
+        loadingText: {
+            marginTop: 10,
+            color: '#777',
+        },
+
+        emptyContainer: {
+            flex: 1,
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: 30,
+        },
+
+        emptyTitle: {
+            marginTop: 12,
+            fontSize: 15,
+            fontWeight: '600',
+            color: '#666',
+        },
+    });

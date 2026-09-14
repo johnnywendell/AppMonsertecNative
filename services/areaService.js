@@ -1,83 +1,122 @@
-import { getDb, runAsync, getAllAsync, getFirstAsync } from '../database';
-import { syncAreas } from './syncService'; // Criaremos esta função em syncService.js
+import {
+    getAllAsync,
+    runAsync
+} from '../database';
 
-/**
- * Insere ou atualiza uma área localmente e marca para sincronização.
- * Assume que a área é sempre ligada a um contrato, mas esse contrato não é editável aqui.
- * @param {object} dados - { id (opcional), area, contrato_server_id }
- */
-export const salvarAreaLocal = async (dados) => {
-    const db = await getDb();
-    const { id, area, contrato_server_id } = dados;
-    let result;
 
-    if (!area || !contrato_server_id) {
-        throw new Error("Área e ID do Contrato são obrigatórios.");
-    }
-    
-    const payload = [
-        area, 
-        contrato_server_id,
-        'pending' // Status para sincronização
-    ];
+const TABLE_NAME =
+    'areas';
 
-    if (id) {
-        // --- ATUALIZAÇÃO ---
-        result = await db.runAsync(
-            `UPDATE areas
-             SET area=?, contrato_server_id=?, sync_status=?, updated_at=CURRENT_TIMESTAMP
-             WHERE id=?`,
-            [...payload.slice(0, -1), 'pending', id]
-        );
-        console.log(`Área local ID ${id} atualizada. Status: pending.`);
-        
-        return { ...dados, sync_status: 'pending' };
 
-    } else {
-        // --- CRIAÇÃO ---
-        result = await db.runAsync(
-            `INSERT INTO areas (area, contrato_server_id, sync_status)
-             VALUES (?, ?, ?)`,
-            payload
-        );
-        console.log(`Área local criada com ID: ${result.lastInsertRowId}. Status: pending.`);
-        
-        return { ...dados, id: result.lastInsertRowId, sync_status: 'pending' };
-    }
-};
+// =========================================================
+// LISTAR CACHE LOCAL
+// =========================================================
 
-/**
- * Lista todas as áreas (Offline-First).
- * 1. Lê primeiro do SQLite.
- * 2. Tenta sincronizar com servidor em background (syncAreas).
- */
-export const listarAreas = async () => {
-    try {
-        // 1. Leitura local
-        const lista = await getAllAsync(
-            "SELECT * FROM areas" 
-        );
+export const listarAreasCache =
+    async () => {
 
-        // Ordenação em memória (como fizemos com colaboradores)
-        const listaOrdenada = lista.sort((a, b) => a.area.localeCompare(b.area));
+        try {
 
-        // 2. Sincronização em background
-        syncAreas().catch((e) => console.warn("Sync de áreas em background falhou:", e.message));
+            const lista =
+                await getAllAsync(
+                    `
+                    SELECT
+                        server_id,
+                        area,
+                        contrato_server_id
+                    FROM ${TABLE_NAME}
+                    WHERE server_id IS NOT NULL
+                    ORDER BY area
+                    `
+                );
 
-        return listaOrdenada;
 
-    } catch (error) {
-        console.error("Erro ao listar áreas localmente:", error);
-        throw error;
-    }
-};
+            return lista || [];
 
-/**
- * Busca uma área por ID local.
- */
-export const buscarArea = async (id) => {
-    return await getFirstAsync(
-        "SELECT * FROM areas WHERE id=?",
-        [id]
-    );
-};
+
+        } catch (error) {
+
+            console.error(
+                'Erro ao listar cache de Áreas:',
+                error
+            );
+
+            return [];
+        }
+    };
+
+
+// =========================================================
+// ATUALIZAR CACHE COM DADOS DA API
+// =========================================================
+
+export const atualizarAreasCache =
+    async (
+        areas = []
+    ) => {
+
+        try {
+
+            // ---------------------------------------------
+            // CACHE É APENAS ESPELHO DA API
+            // ---------------------------------------------
+
+            await runAsync(
+                `
+                DELETE FROM ${TABLE_NAME}
+                `
+            );
+
+
+            // ---------------------------------------------
+            // INSERE DADOS ATUAIS DA API
+            // ---------------------------------------------
+
+            for (
+                const area
+                of areas
+            ) {
+
+                await runAsync(
+                    `
+                    INSERT INTO ${TABLE_NAME} (
+                        server_id,
+                        area,
+                        contrato_server_id,
+                        sync_status
+                    )
+                    VALUES (
+                        ?,
+                        ?,
+                        ?,
+                        'synced'
+                    )
+                    `,
+                    [
+                        area.id,
+
+                        area.area,
+
+                        area.contrato_id ??
+                        area.contrato ??
+                        null
+                    ]
+                );
+            }
+
+
+            console.log(
+                `Cache de Áreas atualizado: ${areas.length} registros`
+            );
+
+
+        } catch (error) {
+
+            console.error(
+                'Erro atualizando cache de Áreas:',
+                error
+            );
+
+            throw error;
+        }
+    };

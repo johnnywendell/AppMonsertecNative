@@ -40,7 +40,7 @@ import {
 import {
     fetchUnidades,
     fetchProjetoCodigos,
-    fetchColaboradores
+    fetchColaboradoresDisponiveisHoje
 } from '../services/dataService';
 
 
@@ -303,7 +303,7 @@ export default function ApontamentoFormScreen({
 
                     fetchProjetoCodigos(),
 
-                    fetchColaboradores(),
+                    fetchColaboradoresDisponiveisHoje(),
                 ]);
 
 

@@ -5,6 +5,7 @@ import { api, BASE_URL } from './api';
 
 const ACCESS_TOKEN_KEY = '@access_token';
 const REFRESH_TOKEN_KEY = '@refresh_token';
+const USERNAME_KEY = '@username';
 
 async function storeTokens({ access, refresh }) {
   try {
@@ -40,42 +41,127 @@ export const setStoredTokens = async (token) => {
 };
 
 async function clearTokens() {
+
   try {
-    await AsyncStorage.multiRemove([ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY]);
+
+    await AsyncStorage.multiRemove([
+      ACCESS_TOKEN_KEY,
+      REFRESH_TOKEN_KEY,
+      USERNAME_KEY
+    ]);
+
   } catch (error) {
-    console.error('Erro ao limpar tokens:', error);
+
+    console.error(
+      'Erro ao limpar tokens:',
+      error
+    );
+
     throw error;
   }
 }
 
 export async function login(username, password) {
+
   try {
+
     const response = await axios.post(
       `${BASE_URL}api/token/`,
-      { username, password },
-      { headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' } }
+      {
+        username,
+        password
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
+      }
     );
 
-    console.log('Tentando login com:', { username, password });
+    const {
+      access,
+      refresh
+    } = response.data;
 
-    const { access, refresh } = response.data;
-    if (!access || !refresh) {
-      throw new Error('Tokens não retornados pela API');
+
+    if (
+      !access ||
+      !refresh
+    ) {
+      throw new Error(
+        'Tokens não retornados pela API'
+      );
     }
 
-    await storeTokens({ access, refresh });
-    console.log('Login bem-sucedido:', response.data);
-    return { success: true };
-  } catch (error) {
-    console.error('Erro ao fazer login:', {
-      status: error.response?.status,
-      data: error.response?.data,
-      message: error.message,
+
+    await storeTokens({
+      access,
+      refresh
     });
+
+
+    // GUARDA O USUÁRIO DO LOGIN
+    await AsyncStorage.setItem(
+      USERNAME_KEY,
+      username
+    );
+
+
+    console.log(
+      'Login bem-sucedido'
+    );
+
+
     return {
-      success: false,
-      error: error.response?.data?.detail || 'Usuário ou senha inválidos',
+      success: true
     };
+
+
+  } catch (error) {
+
+    console.error(
+      'Erro ao fazer login:',
+      {
+        status:
+          error.response?.status,
+
+        data:
+          error.response?.data,
+
+        message:
+          error.message,
+      }
+    );
+
+
+    return {
+
+      success: false,
+
+      error:
+        error.response?.data?.detail ||
+        'Usuário ou senha inválidos',
+    };
+  }
+}
+
+export async function getStoredUsername() {
+
+  try {
+
+    return await AsyncStorage.getItem(
+      USERNAME_KEY
+    );
+
+  } catch (error) {
+
+    console.error(
+      'Erro ao recuperar usuário:',
+      error
+    );
+
+    return null;
   }
 }
 

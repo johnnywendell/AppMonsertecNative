@@ -1,168 +1,595 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { listarProjetoCodigos } from '../../services/projetoCodigoService'; // Importa o novo serviço
-import { MaterialIcons } from '@expo/vector-icons'; // Ícones para o botão
+import React, {
+    useCallback,
+    useState
+} from 'react';
+
+import {
+    View,
+    Text,
+    StyleSheet,
+    FlatList,
+    ActivityIndicator
+} from 'react-native';
+
+import {
+    useFocusEffect
+} from '@react-navigation/native';
+
+import {
+    MaterialIcons
+} from '@expo/vector-icons';
+
+import {
+    listarProjetoCodigosCache
+} from '../../services/projetoCodigoService';
+
+
+const PRIMARY = '#00315c';
+
 
 export default function ProjetoCodigoListScreen() {
-    const navigation = useNavigation();
-    const [projetos, setProjetos] = useState([]); // Mudança: areas -> projetos
-    const [loading, setLoading] = useState(true);
-    const [isRefreshing, setIsRefreshing] = useState(false);
 
-    // Função para buscar os dados e atualizar a lista
-    const fetchProjetoCodigos = async () => {
-        try {
-            // Mudança: listarAreas() -> listarProjetoCodigos()
-            const data = await listarProjetoCodigos(); 
-            setProjetos(data);
-        } catch (error) {
-            console.error('Erro ao buscar lista de Códigos de Projeto:', error);
-        } finally {
-            setLoading(false);
-            setIsRefreshing(false);
-        }
-    };
+    // =====================================================
+    // ESTADOS
+    // =====================================================
 
-    // Use useFocusEffect para recarregar a lista sempre que a tela for focada
+    const [
+        projetos,
+        setProjetos
+    ] = useState([]);
+
+
+    const [
+        loading,
+        setLoading
+    ] = useState(true);
+
+
+    const [
+        isRefreshing,
+        setIsRefreshing
+    ] = useState(false);
+
+
+    // =====================================================
+    // CARREGAR CACHE
+    // =====================================================
+
+    const carregarProjetos =
+        useCallback(async () => {
+
+            try {
+
+                const data =
+                    await listarProjetoCodigosCache();
+
+
+                setProjetos(
+                    data || []
+                );
+
+
+            } catch (error) {
+
+                console.error(
+                    'Erro ao buscar cache de Códigos de Projeto:',
+                    error
+                );
+
+
+            } finally {
+
+                setLoading(false);
+
+                setIsRefreshing(false);
+            }
+
+        }, []);
+
+
+    // =====================================================
+    // RECARREGA AO ENTRAR NA TELA
+    // =====================================================
+
     useFocusEffect(
-        React.useCallback(() => {
+
+        useCallback(() => {
+
             setLoading(true);
-            fetchProjetoCodigos();
-        }, [])
+
+            carregarProjetos();
+
+        }, [
+            carregarProjetos
+        ])
     );
+
+
+    // =====================================================
+    // REFRESH
+    // =====================================================
 
     const handleRefresh = () => {
+
         setIsRefreshing(true);
-        fetchProjetoCodigos();
+
+        carregarProjetos();
     };
 
-    const handleEdit = (id) => {
-        // Mudança: 'AreaForm' -> 'ProjetoCodigoForm'
-        navigation.navigate('ProjetoCodigoForm', { id: id }); 
-    };
 
-    const handleCreate = () => {
-        // Mudança: 'AreaForm' -> 'ProjetoCodigoForm'
-        navigation.navigate('ProjetoCodigoForm');
-    };
+    // =====================================================
+    // ITEM
+    // =====================================================
 
-    const renderItem = ({ item }) => (
-        <TouchableOpacity 
-            style={styles.itemContainer} 
-            onPress={() => handleEdit(item.id)}
-            activeOpacity={0.8}
+    const renderItem = ({
+        item
+    }) => (
+
+        <View
+            style={
+                styles.itemContainer
+            }
         >
-            <View style={styles.textContainer}>
-                {/* Mudança: item.area -> item.projeto_nome */}
-                <Text style={styles.itemName}>{item.projeto_nome}</Text> 
-                
-                {/* Exibe o status de sync (opcional) */}
-                <Text style={styles.syncStatusText}>
-                    Status: {item.sync_status === 'pending' ? '🟡 Pendente' : '🟢 Sincronizado'}
-                </Text>
+
+            <View
+                style={
+                    styles.iconContainer
+                }
+            >
+
+                <MaterialIcons
+                    name="folder-open"
+                    size={22}
+                    color={PRIMARY}
+                />
+
             </View>
-            <MaterialIcons name="edit" size={24} color="#00315c" />
-        </TouchableOpacity>
+
+
+            <View
+                style={
+                    styles.textContainer
+                }
+            >
+
+                <Text
+                    style={
+                        styles.itemName
+                    }
+                    numberOfLines={2}
+                >
+                    {item.projeto_nome || '-'}
+                </Text>
+
+
+                <Text
+                    style={
+                        styles.itemId
+                    }
+                >
+                    ID: {item.server_id}
+                </Text>
+
+            </View>
+
+        </View>
     );
 
-    if (loading && projetos.length === 0) {
-        return <ActivityIndicator size="large" color="#00315c" style={styles.loading} />;
+
+    // =====================================================
+    // LOADING INICIAL
+    // =====================================================
+
+    if (
+        loading &&
+        projetos.length === 0
+    ) {
+
+        return (
+
+            <View
+                style={
+                    styles.loadingContainer
+                }
+            >
+
+                <ActivityIndicator
+                    size="large"
+                    color={PRIMARY}
+                />
+
+                <Text
+                    style={
+                        styles.loadingText
+                    }
+                >
+                    Carregando projetos...
+                </Text>
+
+            </View>
+        );
     }
 
+
+    // =====================================================
+    // RENDER
+    // =====================================================
+
     return (
-        <View style={styles.container}>
+
+        <View
+            style={
+                styles.container
+            }
+        >
+
             <FlatList
-                data={projetos} // Mudança: areas -> projetos
-                renderItem={renderItem}
-                keyExtractor={(item) => item.id.toString()}
-                contentContainerStyle={styles.listContent}
-                refreshing={isRefreshing}
-                onRefresh={handleRefresh}
-                ListEmptyComponent={() => (
-                    !loading && (
-                        <Text style={styles.emptyText}>Nenhum Código de Projeto cadastrado. Crie um!</Text>
-                    )
-                )}
+
+                data={
+                    projetos
+                }
+
+                renderItem={
+                    renderItem
+                }
+
+                keyExtractor={
+                    item =>
+                        String(
+                            item.server_id
+                        )
+                }
+
+                contentContainerStyle={[
+                    styles.listContent,
+
+                    projetos.length === 0 &&
+                    styles.emptyList
+                ]}
+
+                refreshing={
+                    isRefreshing
+                }
+
+                onRefresh={
+                    handleRefresh
+                }
+
+                ListHeaderComponent={
+
+                    projetos.length > 0
+                        ? (
+
+                            <View
+                                style={
+                                    styles.header
+                                }
+                            >
+
+                                <Text
+                                    style={
+                                        styles.headerTitle
+                                    }
+                                >
+                                    Códigos de Projeto
+                                </Text>
+
+
+                                <Text
+                                    style={
+                                        styles.headerSubtitle
+                                    }
+                                >
+                                    {projetos.length}
+                                    {' '}
+                                    {
+                                        projetos.length === 1
+                                            ? 'projeto disponível'
+                                            : 'projetos disponíveis'
+                                    }
+                                </Text>
+
+                            </View>
+                        )
+                        : null
+                }
+
+                ListEmptyComponent={
+
+                    !loading
+                        ? (
+
+                            <View
+                                style={
+                                    styles.emptyContainer
+                                }
+                            >
+
+                                <MaterialIcons
+                                    name="folder-off"
+                                    size={48}
+                                    color="#bbb"
+                                />
+
+
+                                <Text
+                                    style={
+                                        styles.emptyTitle
+                                    }
+                                >
+                                    Nenhum projeto disponível
+                                </Text>
+
+
+                                <Text
+                                    style={
+                                        styles.emptyText
+                                    }
+                                >
+                                    O cache local ainda não possui Códigos de Projeto.
+                                </Text>
+
+                            </View>
+                        )
+                        : null
+                }
+
             />
-            
-            {/* Botão Flutuante para Adicionar */}
-            <TouchableOpacity 
-                style={styles.fab} 
-                onPress={handleCreate}
-                activeOpacity={0.8}
-            >
-                <MaterialIcons name="add" size={28} color="white" />
-            </TouchableOpacity>
+
         </View>
     );
 }
 
-// --- ESTILOS (Ajustados para consistência) ---
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#f5f7fa',
-    },
-    loading: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    listContent: {
-        padding: 10,
-    },
-    itemContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: '#fff',
-        padding: 15,
-        borderRadius: 8,
-        marginBottom: 8,
-        borderLeftWidth: 5,
-        borderLeftColor: '#00315c',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-        elevation: 3,
-    },
-    textContainer: {
-        flex: 1,
-        marginRight: 10,
-    },
-    // Mudança: areaName -> itemName
-    itemName: { 
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#333',
-    },
-    syncStatusText: {
-        fontSize: 12,
-        color: '#666',
-        marginTop: 4,
-    },
-    emptyText: {
-        textAlign: 'center',
-        marginTop: 50,
-        fontSize: 16,
-        color: '#666',
-    },
-    fab: {
-        position: 'absolute',
-        width: 60,
-        height: 60,
-        alignItems: 'center',
-        justifyContent: 'center',
-        right: 20,
-        bottom: 20,
-        backgroundColor: '#00315c',
-        borderRadius: 30,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 6,
-    },
-});
+
+// =========================================================
+// STYLES
+// =========================================================
+
+const styles =
+    StyleSheet.create({
+
+        container: {
+
+            flex: 1,
+
+            backgroundColor:
+                '#f5f5f5',
+        },
+
+
+        listContent: {
+
+            padding:
+                16,
+
+            paddingBottom:
+                30,
+        },
+
+
+        emptyList: {
+
+            flexGrow: 1,
+        },
+
+
+        // -------------------------------------------------
+        // HEADER
+        // -------------------------------------------------
+
+        header: {
+
+            marginBottom:
+                14,
+        },
+
+
+        headerTitle: {
+
+            fontSize:
+                18,
+
+            fontWeight:
+                '700',
+
+            color:
+                PRIMARY,
+        },
+
+
+        headerSubtitle: {
+
+            marginTop:
+                3,
+
+            fontSize:
+                12,
+
+            color:
+                '#777',
+        },
+
+
+        // -------------------------------------------------
+        // ITEM
+        // -------------------------------------------------
+
+        itemContainer: {
+
+            flexDirection:
+                'row',
+
+            alignItems:
+                'center',
+
+            backgroundColor:
+                '#fff',
+
+            borderRadius:
+                10,
+
+            padding:
+                14,
+
+            marginBottom:
+                9,
+
+            elevation:
+                1,
+
+            shadowColor:
+                '#000',
+
+            shadowOpacity:
+                0.05,
+
+            shadowRadius:
+                2,
+
+            shadowOffset: {
+                width: 0,
+                height: 1
+            },
+        },
+
+
+        iconContainer: {
+
+            width:
+                40,
+
+            height:
+                40,
+
+            borderRadius:
+                20,
+
+            backgroundColor:
+                '#eef4f8',
+
+            justifyContent:
+                'center',
+
+            alignItems:
+                'center',
+
+            marginRight:
+                12,
+        },
+
+
+        textContainer: {
+
+            flex:
+                1,
+        },
+
+
+        itemName: {
+
+            fontSize:
+                14,
+
+            fontWeight:
+                '600',
+
+            color:
+                '#333',
+        },
+
+
+        itemId: {
+
+            marginTop:
+                3,
+
+            fontSize:
+                11,
+
+            color:
+                '#999',
+        },
+
+
+        // -------------------------------------------------
+        // LOADING
+        // -------------------------------------------------
+
+        loadingContainer: {
+
+            flex: 1,
+
+            justifyContent:
+                'center',
+
+            alignItems:
+                'center',
+
+            backgroundColor:
+                '#f5f5f5',
+        },
+
+
+        loadingText: {
+
+            marginTop:
+                10,
+
+            fontSize:
+                13,
+
+            color:
+                '#777',
+        },
+
+
+        // -------------------------------------------------
+        // EMPTY
+        // -------------------------------------------------
+
+        emptyContainer: {
+
+            flex: 1,
+
+            justifyContent:
+                'center',
+
+            alignItems:
+                'center',
+
+            padding:
+                30,
+        },
+
+
+        emptyTitle: {
+
+            marginTop:
+                12,
+
+            fontSize:
+                16,
+
+            fontWeight:
+                '600',
+
+            color:
+                '#666',
+        },
+
+
+        emptyText: {
+
+            marginTop:
+                5,
+
+            fontSize:
+                13,
+
+            color:
+                '#999',
+
+            textAlign:
+                'center',
+        },
+    });

@@ -31,7 +31,7 @@ import {
 import {
     fetchUnidades,
     fetchProjetoCodigos,
-    fetchColaboradores
+    fetchColaboradoresList
 } from '../services/dataService';
 
 
@@ -182,7 +182,7 @@ export default function ApontamentosScreen() {
 
                     fetchProjetoCodigos(),
 
-                    fetchColaboradores(),
+                    fetchColaboradoresList(),
                 ]);
 
 
