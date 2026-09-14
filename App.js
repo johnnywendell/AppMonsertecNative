@@ -65,8 +65,8 @@ export default function App() {
                 const { setupDatabase, checkDatabaseHealth, resetDatabase } = await import('./database');
                 
                 // >Pra resetar, comente pra persistir
-                console.warn('!!! AVISO: BANCO DE DADOS SERÁ RESETADO (PERDA TOTAL DE DADOS) !!!');
-                await resetDatabase();
+                //console.warn('!!! AVISO: BANCO DE DADOS SERÁ RESETADO (PERDA TOTAL DE DADOS) !!!');
+                //await resetDatabase();
                 
                 await setupDatabase();
 
